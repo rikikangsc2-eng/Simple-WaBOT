@@ -6,8 +6,18 @@ const readline = require('readline');
 const http = require('http');
 const handler = require('./handler');
 
+const logger = pino({
+    transport: {
+        target: 'pino-pretty',
+        options: {
+            colorize: true,
+            translateTime: 'SYS:dd-mm-yyyy HH:MM:ss',
+            ignore: 'pid,hostname'
+        }
+    }
+});
+
 const sessionPath = path.join(__dirname, 'session');
-const logger = pino({ level: 'silent' });
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -32,27 +42,27 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect } = update;
 
         if (connection === 'connecting') {
-            console.log('Menghubungkan ke WhatsApp...');
+            logger.info('Menghubungkan ke WhatsApp...');
         } else if (connection === 'open') {
-            console.log('Koneksi WhatsApp berhasil terbuka!');
-            rl.close();
+            logger.info('Koneksi WhatsApp berhasil terbuka!');
+            if (rl.writable) rl.close();
         } else if (connection === 'close') {
             const statusCode = new Boom(lastDisconnect.error)?.output?.statusCode;
             if (statusCode === DisconnectReason.loggedOut) {
-                console.log('Koneksi terputus, kredensial tidak valid. Harap hapus folder session dan mulai ulang.');
+                logger.error('Koneksi terputus, kredensial tidak valid. Harap hapus folder session dan mulai ulang.');
                 process.exit(1);
             } else {
-                console.log('Koneksi terputus, mencoba menyambungkan kembali...');
+                logger.warn('Koneksi terputus, mencoba menyambungkan kembali dalam 5 detik...');
                 setTimeout(connectToWhatsApp, 5000);
             }
         }
     });
 
     if (process.stdin.isTTY && !sock.authState.creds.registered) {
-        console.log('Tidak ada sesi ditemukan, menggunakan Pairing Code.');
+        logger.info('Tidak ada sesi ditemukan, menggunakan Pairing Code.');
         const phoneNumber = await question('Masukkan nomor WhatsApp Anda (contoh: 6281234567890): ');
         const pairingCode = await sock.requestPairingCode(phoneNumber.trim());
-        console.log(`Kode Pairing Anda: ${pairingCode}`);
+        console.log(`\nKode Pairing Anda: ${pairingCode}\n`);
     }
 
     sock.ev.on('messages.upsert', async (mek) => {
@@ -61,7 +71,7 @@ async function connectToWhatsApp() {
             if (!m.message || m.key.fromMe || m.key.remoteJid === 'status@broadcast') return;
             await handler(sock, m);
         } catch (e) {
-            console.error(e);
+            logger.error(e, 'Terjadi kesalahan pada handler pesan:');
         }
     });
 
@@ -75,7 +85,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`Server HTTP berjalan di port ${PORT}`);
+    logger.info(`Server HTTP berjalan di port ${PORT}`);
 });
 
-connectToWhatsApp().catch(console.error);
+connectToWhatsApp().catch(err => logger.fatal(err, 'Gagal memulai koneksi WhatsApp:'));
