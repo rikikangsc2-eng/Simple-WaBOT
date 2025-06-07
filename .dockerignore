@@ -1,19 +1,9 @@
-# Dependensi yang diinstal di dalam container
 node_modules
-
-# File kredensial sesi lokal
-session
-
-# Log dan file debug
 npm-debug.log
 *.log
-
-# Konfigurasi Git dan Docker
 .git
 .gitignore
 Dockerfile
 .dockerignore
-
-# Konfigurasi editor/IDE
 .vscode
 .idea
