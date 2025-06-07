@@ -68,7 +68,7 @@ async function connectToWhatsApp() {
     return sock;
 }
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 7860;
 const redirectUrl = 'https://nirkyy-dev.hf.space';
 
 const server = http.createServer((req, res) => {
