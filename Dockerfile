@@ -14,6 +14,6 @@ chown -R node:node /app
 
 USER node
 
-EXPOSE 7860
+EXPOSE 3000
 
 CMD ["node", "index.js"]

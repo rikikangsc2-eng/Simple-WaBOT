@@ -1,3 +1,8 @@
+# Setting di Koyeb
+- Setting Ke Dockerfile
+- Gunakan port 3000
+- Deploy Dan jangan lupa uptime di uptimerobot 
+
 # 🛠️ Dokumentasi Fungsi Helper (`message`)
 
 Objek `message` (atau `m`) yang diterima oleh setiap plugin sudah dilengkapi dengan fungsi-fungsi praktis:
