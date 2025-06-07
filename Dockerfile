@@ -7,7 +7,7 @@ WORKDIR /app
 RUN mkdir -p /app/session && chmod 777 /app/session
 
 COPY package.json .
-RUN npm install --omit=dev --prefer-offline
+RUN npm install 
 
 COPY . .
 
