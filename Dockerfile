@@ -1,15 +1,16 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
 COPY package.json ./
 
-RUN npm install --production
+RUN apk add --no-cache git && \
+npm install --production
 
 COPY . .
 
 RUN mkdir -p session && \
-    chown -R node:node /app
+chown -R node:node /app
 
 USER node
 
