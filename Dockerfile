@@ -13,6 +13,6 @@ RUN mkdir -p session && \
 
 USER node
 
-EXPOSE 7860
+EXPOSE 3000
 
 CMD ["node", "index.js"]
