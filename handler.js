@@ -89,37 +89,65 @@ module.exports = async (sock, m) => {
     if (!fs.existsSync(afkPath)) fs.writeFileSync(afkPath, '{}');
     const groupSettingsPath = path.join(dbDir, 'groupSettings.json');
     if (!fs.existsSync(groupSettingsPath)) fs.writeFileSync(groupSettingsPath, '{}');
+    const usersPath = path.join(dbDir, 'users.json');
+    if (!fs.existsSync(usersPath)) fs.writeFileSync(usersPath, '{}');
+    const gameSessionsPath = path.join(dbDir, 'gameSessions.json');
+    if (!fs.existsSync(gameSessionsPath)) fs.writeFileSync(gameSessionsPath, '{}');
+    
     
     let afkData = JSON.parse(fs.readFileSync(afkPath));
     let groupSettingsData = JSON.parse(fs.readFileSync(groupSettingsPath));
+    let usersData = JSON.parse(fs.readFileSync(usersPath));
+    let gameSessions = JSON.parse(fs.readFileSync(gameSessionsPath));
     
-    await handleAntiLink(sock, message, groupSettingsData);
-    
-    const mentionedJids = message.msg?.contextInfo?.mentionedJid || [];
-    const quotedUserJid = message.msg?.contextInfo?.participant;
-    const jidsToCheck = [...mentionedJids];
-    
-    if (quotedUserJid && !jidsToCheck.includes(quotedUserJid)) {
-        jidsToCheck.push(quotedUserJid);
+    if (!usersData[message.sender]) {
+        usersData[message.sender] = { money: 1000 };
+        fs.writeFileSync(usersPath, JSON.stringify(usersData, null, 2));
     }
     
-    if (afkData[message.sender]) {
-        const afkInfo = afkData[message.sender];
-        const duration = formatAfkDuration(Date.now() - afkInfo.time);
-        await message.reply(`👋 *Selamat datang kembali!*\n\nAnda telah AFK selama *${duration}*.`);
-        delete afkData[message.sender];
-        fs.writeFileSync(afkPath, JSON.stringify(afkData, null, 2));
-    }
-    
-    for (const jid of jidsToCheck) {
-        if (jid === message.sender) continue;
-        if (afkData[jid]) {
-            const afkInfo = afkData[jid];
+    if (message.isGroup) {
+        if (afkData[message.from] && afkData[message.from][message.sender]) {
+            const afkInfo = afkData[message.from][message.sender];
             const duration = formatAfkDuration(Date.now() - afkInfo.time);
-            const response = `🤫 Jangan ganggu dia!\n\n*User:* @${jid.split('@')[0]}\n*Status:* AFK sejak *${duration}* lalu\n*Alasan:* ${afkInfo.reason}`;
-            await sock.sendMessage(message.from, { text: response, mentions: [jid] }, { quoted: message });
+            await message.reply(`👋 *Selamat datang kembali!*\n\nAnda telah AFK selama *${duration}* di grup ini.`);
+            delete afkData[message.from][message.sender];
+            fs.writeFileSync(afkPath, JSON.stringify(afkData, null, 2));
+        }
+        
+        const mentionedJids = message.msg?.contextInfo?.mentionedJid || [];
+        const quotedUserJid = message.msg?.contextInfo?.participant;
+        const jidsToCheck = [...mentionedJids];
+        
+        if (quotedUserJid && !jidsToCheck.includes(quotedUserJid)) {
+            jidsToCheck.push(quotedUserJid);
+        }
+        
+        for (const jid of jidsToCheck) {
+            if (jid === message.sender) continue;
+            if (afkData[message.from] && afkData[message.from][jid]) {
+                const afkInfo = afkData[message.from][jid];
+                const duration = formatAfkDuration(Date.now() - afkInfo.time);
+                const response = `🤫 Jangan ganggu dia!\n\n*User:* @${jid.split('@')[0]}\n*Status:* AFK sejak *${duration}* lalu\n*Alasan:* ${afkInfo.reason}`;
+                await sock.sendMessage(message.from, { text: response, mentions: [jid] }, { quoted: message });
+            }
         }
     }
+    
+    if (gameSessions[message.from] && message.body && message.body.toUpperCase() === gameSessions[message.from].answer.toUpperCase()) {
+        const session = gameSessions[message.from];
+        clearTimeout(session.timeout);
+        
+        const reward = session.reward;
+        usersData[message.sender].money += reward;
+        fs.writeFileSync(usersPath, JSON.stringify(usersData, null, 2));
+        
+        await message.reply(`🎉 *Benar!* Jawaban yang tepat adalah *${session.answer}*.\n\nAnda mendapatkan *Rp ${reward.toLocaleString()}*!`);
+        
+        delete gameSessions[message.from];
+        fs.writeFileSync(gameSessionsPath, JSON.stringify(gameSessions, null, 2));
+    }
+    
+    await handleAntiLink(sock, message, groupSettingsData);
     
     if (config.autoRead) {
         await sock.readMessages([message.key]);
