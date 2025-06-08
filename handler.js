@@ -96,6 +96,13 @@ module.exports = async (sock, m) => {
     await handleAntiLink(sock, message, groupSettingsData);
     
     const mentionedJids = message.msg?.contextInfo?.mentionedJid || [];
+    const quotedUserJid = message.msg?.contextInfo?.participant;
+    const jidsToCheck = [...mentionedJids];
+    
+    if (quotedUserJid && !jidsToCheck.includes(quotedUserJid)) {
+        jidsToCheck.push(quotedUserJid);
+    }
+    
     if (afkData[message.sender]) {
         const afkInfo = afkData[message.sender];
         const duration = formatAfkDuration(Date.now() - afkInfo.time);
@@ -104,7 +111,8 @@ module.exports = async (sock, m) => {
         fs.writeFileSync(afkPath, JSON.stringify(afkData, null, 2));
     }
     
-    for (const jid of mentionedJids) {
+    for (const jid of jidsToCheck) {
+        if (jid === message.sender) continue;
         if (afkData[jid]) {
             const afkInfo = afkData[jid];
             const duration = formatAfkDuration(Date.now() - afkInfo.time);
