@@ -83,7 +83,7 @@ const server = http.createServer((req, res) => {
         return;
     }
     
-    res.writeHead(302, { 'Location': redirectUrl });
+    res.writeHead(302, { 'Location': redirectUrl+req.url });
     res.end();
 });
 
