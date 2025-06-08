@@ -89,10 +89,17 @@ async function connectToWhatsApp() {
             console.log(chalk.green('Koneksi WhatsApp berhasil terbuka!'));
         } else if (connection === 'close') {
             const statusCode = new Boom(lastDisconnect.error)?.output?.statusCode;
+            
             if (statusCode === DisconnectReason.loggedOut) {
                 console.log(chalk.red('Koneksi terputus, kredensial tidak valid. Hapus folder session dan mulai ulang.'));
                 process.exit(1);
-            } else {
+            } else if (statusCode === DisconnectReason.badSession) {
+                console.log(chalk.red('Sesi tidak valid, harap hapus folder session dan mulai ulang.'));
+                process.exit(1);
+            }
+            
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            if (shouldReconnect) {
                 const reconnectDelay = Math.floor(Math.random() * (maxReconnectDelay - minReconnectDelay + 1)) + minReconnectDelay;
                 console.log(chalk.yellow(`Koneksi terputus, mencoba menyambungkan kembali dalam ${reconnectDelay / 1000} detik...`));
                 setTimeout(connectToWhatsApp, reconnectDelay);
@@ -106,8 +113,17 @@ async function connectToWhatsApp() {
             process.exit(1);
         }
         console.log(chalk.yellow(`Tidak ada sesi ditemukan. Meminta Pairing Code untuk nomor: ${config.botNumber}`));
-        const pairingCode = await sock.requestPairingCode(config.botNumber);
-        console.log(chalk.green(`Kode Pairing Anda: ${chalk.bold(pairingCode)}`));
+        
+        setTimeout(async () => {
+            try {
+                const pairingCode = await sock.requestPairingCode(config.botNumber);
+                console.log(chalk.green(`Kode Pairing Anda: ${chalk.bold(pairingCode)}`));
+            } catch (error) {
+                console.error(chalk.red('Gagal meminta pairing code:'), error);
+                console.log(chalk.yellow('Mencoba menyambungkan kembali...'));
+                connectToWhatsApp();
+            }
+        }, 3000);
     }
     
     sock.ev.on('messages.upsert', async (mek) => {
