@@ -13,7 +13,7 @@ const config = require('./config');
 const { getBuffer } = require('./lib/functions');
 
 let sock = null;
-let botStatus = 'connecting';
+let botStatus = 'starting';
 let pairingCode = null;
 let startTime = Date.now();
 
@@ -34,10 +34,7 @@ function getCPUUsage(callback) {
         const endTime = process.hrtime.bigint();
         const endUsage = process.cpuUsage();
         const elapTime = endTime - startTime;
-        const elapUsage = {
-            user: endUsage.user - startUsage.user,
-            system: endUsage.system - startUsage.system,
-        };
+        const elapUsage = { user: endUsage.user - startUsage.user, system: endUsage.system - startUsage.system };
         const cpuPercent = ((elapUsage.user + elapUsage.system) / 1000 / Number(elapTime / 1000n)) * 100;
         callback(cpuPercent.toFixed(2));
     }, 1000);
@@ -65,7 +62,7 @@ async function handleGroupUpdate(sock, event) {
             }
             const messageOptions = { text: welcomeText, mentions: [jid] };
             if (userThumb) {
-                messageOptions.contextInfo = { externalAdReply: { title: config.botName, body: 'Selamat Datang!', thumbnail: userThumb, sourceUrl: `https://wa.me/${config.ownerNumber}`, mediaType: 1 } };
+                messageOptions.contextInfo = { externalAdReply: { title: config.botName, body: 'Selamat Datang!', thumbnail: userThumb, sourceUrl: `https://wa.me/${config.ownerNumber}`, mediaType: 1 }};
             }
             await sock.sendMessage(id, messageOptions);
         }
@@ -84,6 +81,18 @@ async function connectToWhatsApp() {
         logger,
         version: [2, 2413, 1],
     });
+
+    if (!sock.authState.creds.registered) {
+        botStatus = 'needs_pairing';
+        if (process.stdin.isTTY) {
+            const phoneNumber = await question(chalk.cyan('Masukkan nomor WhatsApp Anda (contoh: 6281234567890): '));
+            pairingCode = await sock.requestPairingCode(phoneNumber.trim());
+            botStatus = 'pairing_code_generated';
+            console.log(chalk.green(`Kode Pairing Anda: ${chalk.bold(pairingCode)}`));
+        } else {
+            console.log(chalk.yellow(`Sesi tidak ditemukan. Silakan akses web UI di port ${PORT} untuk melakukan pairing.`));
+        }
+    }
     
     sock.ev.on('creds.update', saveCreds);
     
@@ -101,25 +110,17 @@ async function connectToWhatsApp() {
         } else if (connection === 'close') {
             botStatus = 'close';
             const statusCode = new Boom(lastDisconnect.error)?.output?.statusCode;
-            if (statusCode === DisconnectReason.loggedOut) {
-                console.log(chalk.red('Koneksi terputus, kredensial tidak valid. Harap hapus folder session dan mulai ulang.'));
-                process.exit(1);
+            if (statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession) {
+                console.log(chalk.red(`Koneksi terputus karena Sesi Buruk/Logout. Menghapus sesi lama dan memulai ulang...`));
+                fs.rmSync(sessionPath, { recursive: true, force: true });
+                connectToWhatsApp();
             } else {
                 console.log(chalk.yellow('Koneksi terputus, mencoba menyambungkan kembali...'));
                 setTimeout(connectToWhatsApp, 15000);
             }
         }
     });
-    
-    if (process.stdin.isTTY && !sock.authState.creds.registered) {
-        botStatus = 'needs_pairing_console';
-        console.log(chalk.yellow('Tidak ada sesi ditemukan, menggunakan Pairing Code.'));
-        const phoneNumber = await question(chalk.cyan('Masukkan nomor WhatsApp Anda (contoh: 6281234567890): '));
-        pairingCode = await sock.requestPairingCode(phoneNumber.trim());
-        botStatus = 'pairing_code_generated_console';
-        console.log(chalk.green(`Kode Pairing Anda: ${chalk.bold(pairingCode)}`));
-    }
-    
+
     sock.ev.on('messages.upsert', async (mek) => {
         try {
             const m = mek.messages[0];
@@ -142,7 +143,7 @@ async function connectToWhatsApp() {
             console.error(e);
         }
     });
-    
+
     sock.ev.on('group-participants.update', async (event) => {
         await handleGroupUpdate(sock, event);
     });
@@ -155,20 +156,11 @@ const server = http.createServer((req, res) => {
     const reqUrl = new URL(req.url, `http://${req.headers.host}`);
     res.setHeader('Access-Control-Allow-Origin', '*');
     
-    if (req.method === 'OPTIONS') {
-        res.writeHead(204);
-        res.end();
-        return;
-    }
-    
-    if (reqUrl.pathname !== '/') {
-        res.writeHead(302, { 'Location': redirectUrl + req.url });
-        res.end();
-        return;
-    }
-    
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    if (reqUrl.pathname !== '/') { res.writeHead(302, { 'Location': redirectUrl + req.url }); res.end(); return; }
+
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    
+
     if (req.method === 'POST') {
         let body = '';
         req.on('data', chunk => { body += chunk.toString(); });
@@ -178,7 +170,7 @@ const server = http.createServer((req, res) => {
             if (phoneNumber && sock && botStatus !== 'open') {
                 try {
                     pairingCode = await sock.requestPairingCode(phoneNumber.trim());
-                    botStatus = 'pairing_code_generated_web';
+                    botStatus = 'pairing_code_generated';
                     res.end(`<h1>Kode Pairing Anda: ${pairingCode}</h1><p>Masukkan kode ini di perangkat WhatsApp Anda pada menu "Perangkat Tertaut" > "Tautkan dengan nomor telepon".</p><a href="/">Kembali</a>`);
                 } catch (e) {
                     res.end(`<h1>Gagal meminta kode pairing</h1><p>${e.message}</p><a href="/">Coba lagi</a>`);
@@ -189,22 +181,20 @@ const server = http.createServer((req, res) => {
         });
         return;
     }
-    
+
     if (botStatus === 'open') {
         getCPUUsage(cpu => {
             const uptime = Math.floor((Date.now() - startTime) / 1000);
             res.end(`<h2>Bot Aktif</h2><p>Status: Terhubung</p><p>Uptime: ${uptime} detik</p><p>CPU Usage: ${cpu}%</p>`);
         });
-    } else if (pairingCode) {
+    } else if (botStatus === 'pairing_code_generated') {
         res.end(`<h1>Kode Pairing Anda: ${pairingCode}</h1><p>Masukkan kode ini di perangkat WhatsApp Anda.</p><a href="/">Refresh</a>`);
     } else if (botStatus === 'connecting' || botStatus === 'close') {
         res.end(`<h1>Bot sedang ${botStatus === 'connecting' ? 'Menyambungkan' : 'Menyambungkan Ulang'}...</h1><p>Silakan refresh halaman ini dalam beberapa saat.</p>`);
+    } else if (botStatus === 'needs_pairing') {
+        res.end(`<h1>Masukkan Nomor Telepon untuk Pairing</h1><form method="POST" action="/"><input type="text" name="phone" placeholder="Contoh: 6281234567890" required><button type="submit">Minta Kode Pairing</button></form>`);
     } else {
-        res.end(`<h1>Masukkan Nomor Telepon untuk Pairing</h1>
-                 <form method="POST" action="/">
-                     <input type="text" name="phone" placeholder="Contoh: 6281234567890" required>
-                     <button type="submit">Minta Kode Pairing</button>
-                 </form>`);
+        res.end('<h1>Bot sedang memulai...</h1><p>Silakan refresh halaman ini dalam beberapa saat.</p>');
     }
 });
 
