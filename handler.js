@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const chalk = require('chalk');
 const config = require('./config');
 const { serialize } = require('./lib/serialize');
 
@@ -43,6 +44,15 @@ function formatAfkDuration(ms) {
 module.exports = async (sock, m) => {
     if (!m) return;
     const message = await serialize(sock, m);
+    
+    if (message.body) {
+        const timestamp = new Date().toLocaleTimeString();
+        const from = message.pushName;
+        const inType = message.isGroup ? 'Grup' : 'Pribadi';
+        const groupName = message.isGroup ? ` di ${chalk.yellow((await sock.groupMetadata(message.from)).subject)}` : '';
+        const log = `[${chalk.gray(timestamp)}] [${chalk.yellow(inType)}] dari ${chalk.green(from)}${groupName}: ${chalk.white(message.body)}`;
+        console.log(log);
+    }
     
     const dbDir = path.join(__dirname, 'database');
     if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir);

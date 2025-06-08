@@ -2,9 +2,9 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
 const path = require('path');
-const readline = require('readline');
 const http = require('http');
 const fs = require('fs');
+const chalk = require('chalk');
 const handler = require('./handler');
 const config = require('./config');
 const { getBuffer } = require('./lib/functions');
@@ -12,12 +12,6 @@ const { getBuffer } = require('./lib/functions');
 const sessionPath = path.join(__dirname, 'session');
 const logger = pino({ level: 'silent' });
 
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
-
-const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 const minReconnectDelay = 10000;
 const maxReconnectDelay = 30000;
 
@@ -90,28 +84,30 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect } = update;
         
         if (connection === 'connecting') {
-            console.log('Menghubungkan ke WhatsApp...');
+            console.log(chalk.yellow('Menghubungkan ke WhatsApp...'));
         } else if (connection === 'open') {
-            console.log('Koneksi WhatsApp berhasil terbuka!');
-            if (rl) rl.close();
+            console.log(chalk.green('Koneksi WhatsApp berhasil terbuka!'));
         } else if (connection === 'close') {
             const statusCode = new Boom(lastDisconnect.error)?.output?.statusCode;
             if (statusCode === DisconnectReason.loggedOut) {
-                console.log('Koneksi terputus, kredensial tidak valid. Harap hapus folder session dan mulai ulang.');
+                console.log(chalk.red('Koneksi terputus, kredensial tidak valid. Hapus folder session dan mulai ulang.'));
                 process.exit(1);
             } else {
                 const reconnectDelay = Math.floor(Math.random() * (maxReconnectDelay - minReconnectDelay + 1)) + minReconnectDelay;
-                console.log(`Koneksi terputus, mencoba menyambungkan kembali dalam ${reconnectDelay / 1000} detik...`);
+                console.log(chalk.yellow(`Koneksi terputus, mencoba menyambungkan kembali dalam ${reconnectDelay / 1000} detik...`));
                 setTimeout(connectToWhatsApp, reconnectDelay);
             }
         }
     });
     
-    if (process.stdin.isTTY && !sock.authState.creds.registered) {
-        console.log('Tidak ada sesi ditemukan, menggunakan Pairing Code.');
-        const phoneNumber = await question('Masukkan nomor WhatsApp Anda (contoh: 6281234567890): ');
-        const pairingCode = await sock.requestPairingCode(phoneNumber.trim());
-        console.log(`Kode Pairing Anda: ${pairingCode}`);
+    if (!sock.authState.creds.registered) {
+        if (!config.botNumber) {
+            console.log(chalk.red('Error: "botNumber" tidak diatur di config.js. Harap isi untuk mendapatkan pairing code.'));
+            process.exit(1);
+        }
+        console.log(chalk.yellow(`Tidak ada sesi ditemukan. Meminta Pairing Code untuk nomor: ${config.botNumber}`));
+        const pairingCode = await sock.requestPairingCode(config.botNumber);
+        console.log(chalk.green(`Kode Pairing Anda: ${chalk.bold(pairingCode)}`));
     }
     
     sock.ev.on('messages.upsert', async (mek) => {
