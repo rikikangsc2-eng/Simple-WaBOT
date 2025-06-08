@@ -1,7 +1,7 @@
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 
 module.exports = {
-    command: 's',
+    command: ['s','sticker'],
     description: 'Membuat stiker dari gambar/video.',
     run: async (sock, message, args) =>  {
         let mediaSource = null;

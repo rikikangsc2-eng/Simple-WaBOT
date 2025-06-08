@@ -16,7 +16,11 @@ fs.readdirSync(pluginsDir).forEach(category => {
                     const pluginPath = path.join(categoryDir, file);
                     const plugin = require(pluginPath);
                     if (plugin.command && plugin.run) {
-                        plugins.set(plugin.command, plugin);
+                        if (Array.isArray(plugin.command)) {
+                            plugin.command.forEach(alias => plugins.set(alias, plugin));
+                        } else {
+                            plugins.set(plugin.command, plugin);
+                        }
                     }
                 } catch (e) {
                     console.error(`Gagal memuat plugin ${file} di kategori ${category}:`, e);
@@ -41,6 +45,31 @@ function formatAfkDuration(ms) {
     return duration.join(', ') || 'beberapa saat';
 }
 
+async function handleAntiLink(sock, message, settings) {
+    if (!message.isGroup || !message.body) return;
+    const groupSetting = settings[message.from];
+    if (!groupSetting || !groupSetting.isAntilinkEnabled) return;
+    
+    const linkRegex = /https:\/\/chat\.whatsapp\.com\/[a-zA-Z0-9]{22}/g;
+    if (linkRegex.test(message.body)) {
+        const groupMeta = await sock.groupMetadata(message.from);
+        const sender = groupMeta.participants.find(p => p.id === message.sender);
+        const isAdmin = sender && (sender.admin === 'admin' || sender.admin === 'superadmin');
+        const isOwner = message.sender.startsWith(config.ownerNumber);
+        
+        if (isAdmin || isOwner) return;
+        
+        const bot = groupMeta.participants.find(p => p.id === sock.user.id.split(':')[0] + '@s.whatsapp.net');
+        const isBotAdmin = bot && (bot.admin === 'admin' || bot.admin === 'superadmin');
+        
+        if (!isBotAdmin) return console.log(chalk.yellow(`Bot bukan admin di grup ${groupMeta.subject}, tidak bisa menjalankan anti link.`));
+        
+        await message.reply('Terdeteksi link grup WhatsApp! Anda akan dikeluarkan.');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await sock.groupParticipantsUpdate(message.from, [message.sender], 'remove');
+    }
+}
+
 module.exports = async (sock, m) => {
     if (!m) return;
     const message = await serialize(sock, m);
@@ -58,10 +87,15 @@ module.exports = async (sock, m) => {
     if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir);
     const afkPath = path.join(dbDir, 'afk.json');
     if (!fs.existsSync(afkPath)) fs.writeFileSync(afkPath, '{}');
+    const groupSettingsPath = path.join(dbDir, 'groupSettings.json');
+    if (!fs.existsSync(groupSettingsPath)) fs.writeFileSync(groupSettingsPath, '{}');
     
     let afkData = JSON.parse(fs.readFileSync(afkPath));
-    const mentionedJids = message.msg?.contextInfo?.mentionedJid || [];
+    let groupSettingsData = JSON.parse(fs.readFileSync(groupSettingsPath));
     
+    await handleAntiLink(sock, message, groupSettingsData);
+    
+    const mentionedJids = message.msg?.contextInfo?.mentionedJid || [];
     if (afkData[message.sender]) {
         const afkInfo = afkData[message.sender];
         const duration = formatAfkDuration(Date.now() - afkInfo.time);
