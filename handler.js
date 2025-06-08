@@ -25,30 +25,38 @@ fs.readdirSync(pluginsDir).forEach(category => {
     }
 });
 
-
 module.exports = async (sock, m) => {
     if (!m) return;
-
+    
     const message = await serialize(sock, m);
-
+    
     if (config.autoRead) {
         await sock.readMessages([message.key]);
     }
-
+    
+    const ownerJid = `${config.ownerNumber}@s.whatsapp.net`;
+    const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+    const isOwner = message.sender === ownerJid;
+    const isBot = message.sender === botJid;
+    
+    if (!config.isPublic && !isOwner && !isBot) {
+        return;
+    }
+    
     if (!message.body || !message.body.startsWith(config.prefix)) return;
-
+    
     const args = message.body.slice(config.prefix.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
-
+    
     const plugin = plugins.get(command);
-
+    
     if (plugin) {
         if (config.autoTyping) {
             await sock.sendPresenceUpdate('composing', message.from);
         }
-
+        
         try {
-            await plugin.run(message, args);
+            await plugin.run(sock, message, args);
         } catch (e) {
             console.error(`Error saat menjalankan plugin ${command}:`, e);
             message.reply(`Terjadi kesalahan: ${e.message}`);

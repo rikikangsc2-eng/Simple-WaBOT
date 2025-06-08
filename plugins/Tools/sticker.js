@@ -3,7 +3,7 @@ const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 module.exports = {
     command: 's',
     description: 'Membuat stiker dari gambar/video.',
-    run: async (message, args) => {
+    run: async (sock, message, args) =>  {
         let mediaSource = null;
         const quotedMessage = message.msg?.contextInfo?.quotedMessage;
 

@@ -14,7 +14,7 @@ function formatUptime(seconds) {
 module.exports = {
     command: 'ping',
     description: 'Mengecek kecepatan respon dan status bot.',
-    run: async (message, args) => {
+    run: async (sock, message, args) =>  {
         const startTime = Date.now();
 
         const usedMem = process.memoryUsage().heapUsed / 1024 / 1024;

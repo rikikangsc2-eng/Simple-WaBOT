@@ -4,7 +4,7 @@ const { uploadToImgbb } = require('../../lib/functions');
 module.exports = {
     command: 'tourl',
     description: 'Mengubah media gambar/video menjadi URL.',
-    run: async (message, args) => {
+    run: async (sock, message, args) =>  {
         let mediaSource = null;
         const quotedMessage = message.msg?.contextInfo?.quotedMessage;
 

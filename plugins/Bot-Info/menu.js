@@ -17,7 +17,7 @@ function formatUptime(seconds) {
 module.exports = {
     command: 'menu',
     description: 'Menampilkan semua fitur yang tersedia.',
-    run: async (message, args) => {
+    run: async (sock, message, args) =>  {
         const usedMem = process.memoryUsage().heapUsed / 1024 / 1024;
         const uptime = process.uptime();
 
