@@ -81,18 +81,6 @@ async function connectToWhatsApp() {
         logger,
         version: [2, 2413, 1],
     });
-
-    if (!sock.authState.creds.registered) {
-        botStatus = 'needs_pairing';
-        if (process.stdin.isTTY) {
-            const phoneNumber = await question(chalk.cyan('Masukkan nomor WhatsApp Anda (contoh: 6281234567890): '));
-            pairingCode = await sock.requestPairingCode(phoneNumber.trim());
-            botStatus = 'pairing_code_generated';
-            console.log(chalk.green(`Kode Pairing Anda: ${chalk.bold(pairingCode)}`));
-        } else {
-            console.log(chalk.yellow(`Sesi tidak ditemukan. Silakan akses web UI di port ${PORT} untuk melakukan pairing.`));
-        }
-    }
     
     sock.ev.on('creds.update', saveCreds);
     
@@ -108,12 +96,16 @@ async function connectToWhatsApp() {
             console.log(chalk.green('Koneksi WhatsApp berhasil terbuka!'));
             if (rl) rl.close();
         } else if (connection === 'close') {
-            botStatus = 'close';
             const statusCode = new Boom(lastDisconnect.error)?.output?.statusCode;
+            if (botStatus === 'needs_pairing') {
+                console.log(chalk.yellow('Koneksi ditutup, menunggu input pairing...'));
+                return;
+            }
+            botStatus = 'close';
             if (statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession) {
-                console.log(chalk.red(`Koneksi terputus karena Sesi Buruk/Logout. Menghapus sesi lama dan memulai ulang...`));
+                console.log(chalk.red(`Sesi Buruk/Logout. Menghapus sesi lama dan memulai ulang...`));
                 fs.rmSync(sessionPath, { recursive: true, force: true });
-                connectToWhatsApp();
+                process.exit(1);
             } else {
                 console.log(chalk.yellow('Koneksi terputus, mencoba menyambungkan kembali...'));
                 setTimeout(connectToWhatsApp, 15000);
@@ -152,6 +144,24 @@ async function connectToWhatsApp() {
 const PORT = process.env.PORT || 3000;
 const redirectUrl = 'https://nirkyy-dev.hf.space';
 
+async function main() {
+    const sessionExists = fs.existsSync(path.join(sessionPath, 'creds.json'));
+    
+    if (!sessionExists) {
+        botStatus = 'needs_pairing';
+        console.log(chalk.yellow('Sesi tidak ditemukan, memulai mode pairing.'));
+    }
+
+    await connectToWhatsApp();
+
+    if (botStatus === 'needs_pairing' && process.stdin.isTTY) {
+        const phoneNumber = await question(chalk.cyan('Masukkan nomor WhatsApp Anda (contoh: 6281234567890): '));
+        pairingCode = await sock.requestPairingCode(phoneNumber.trim());
+        botStatus = 'pairing_code_generated';
+        console.log(chalk.green(`Kode Pairing Anda: ${chalk.bold(pairingCode)}`));
+    }
+}
+
 const server = http.createServer((req, res) => {
     const reqUrl = new URL(req.url, `http://${req.headers.host}`);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -171,7 +181,7 @@ const server = http.createServer((req, res) => {
                 try {
                     pairingCode = await sock.requestPairingCode(phoneNumber.trim());
                     botStatus = 'pairing_code_generated';
-                    res.end(`<h1>Kode Pairing Anda: ${pairingCode}</h1><p>Masukkan kode ini di perangkat WhatsApp Anda pada menu "Perangkat Tertaut" > "Tautkan dengan nomor telepon".</p><a href="/">Kembali</a>`);
+                    res.end(`<h1>Kode Pairing Anda: ${pairingCode}</h1><p>Masukkan kode ini di perangkat WhatsApp Anda.</p><a href="/">Refresh</a>`);
                 } catch (e) {
                     res.end(`<h1>Gagal meminta kode pairing</h1><p>${e.message}</p><a href="/">Coba lagi</a>`);
                 }
@@ -192,7 +202,11 @@ const server = http.createServer((req, res) => {
     } else if (botStatus === 'connecting' || botStatus === 'close') {
         res.end(`<h1>Bot sedang ${botStatus === 'connecting' ? 'Menyambungkan' : 'Menyambungkan Ulang'}...</h1><p>Silakan refresh halaman ini dalam beberapa saat.</p>`);
     } else if (botStatus === 'needs_pairing') {
-        res.end(`<h1>Masukkan Nomor Telepon untuk Pairing</h1><form method="POST" action="/"><input type="text" name="phone" placeholder="Contoh: 6281234567890" required><button type="submit">Minta Kode Pairing</button></form>`);
+        if (!process.stdin.isTTY) {
+             res.end(`<h1>Masukkan Nomor Telepon untuk Pairing</h1><form method="POST" action="/"><input type="text" name="phone" placeholder="Contoh: 6281234567890" required><button type="submit">Minta Kode Pairing</button></form>`);
+        } else {
+             res.end(`<h1>Menunggu Input di Console</h1><p>Silakan masukkan nomor telepon di terminal tempat bot berjalan.</p>`);
+        }
     } else {
         res.end('<h1>Bot sedang memulai...</h1><p>Silakan refresh halaman ini dalam beberapa saat.</p>');
     }
@@ -200,6 +214,5 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
     console.log(`Server HTTP berjalan di port ${PORT}`);
+    main().catch(console.error);
 });
-
-connectToWhatsApp().catch(console.error);
