@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const process = require('process');
-const config = require('../../config'); 
+const config = require('../../config');
+const { getBuffer } = require('../../lib/functions');
 
 function formatUptime(seconds) {
     function pad(s) {
@@ -17,14 +18,14 @@ function formatUptime(seconds) {
 module.exports = {
     command: 'menu',
     description: 'Menampilkan semua fitur yang tersedia.',
-    run: async (sock, message, args) =>  {
+    run: async (sock, message, args) => {
         const usedMem = process.memoryUsage().heapUsed / 1024 / 1024;
         const uptime = process.uptime();
-
-        const pluginsDir = path.join(__dirname, '..'); // <-- PATH BERUBAH
+        
+        const pluginsDir = path.join(__dirname, '..');
         const commandCategories = {};
-        const categoryOrder = ['Bot-Info', 'Owner', 'AI', 'Downloader', 'Tools', 'Fun', 'Other'];
-
+        const categoryOrder = ['Bot-Info', 'Owner', 'AI', 'Group', 'Downloader', 'Tools', 'Fun', 'Other'];
+        
         fs.readdirSync(pluginsDir).forEach(category => {
             const categoryDir = path.join(pluginsDir, category);
             if (fs.statSync(categoryDir).isDirectory()) {
@@ -43,16 +44,16 @@ module.exports = {
                 });
             }
         });
-
+        
         let menuText = `*Hai, ${message.pushName || 'User'}!*
 Bot ini siap membantu Anda.
 
 ┌─「 *BOT STATUS* 」
-│ ❖ *Owner* : ${config.ownerNumber}
+│ ❖ *Owner* : ${config.ownerName}
 │ ❖ *Uptime* : ${formatUptime(uptime)}
 │ ❖ *RAM* : ${usedMem.toFixed(2)} MB
 └─\n\n`;
-
+        
         for (const category of categoryOrder) {
             if (commandCategories[category] && commandCategories[category].length > 0) {
                 menuText += `┌─「 *${category}* 」\n`;
@@ -62,9 +63,34 @@ Bot ini siap membantu Anda.
                 menuText += `└─\n\n`;
             }
         }
-
+        
         menuText += `Ketik *.command* untuk menggunakan fitur.`;
-
-        await message.reply(menuText);
+        
+        let userThumb;
+        try {
+            const ppUrl = await sock.profilePictureUrl(message.sender, 'image');
+            userThumb = await getBuffer(ppUrl);
+        } catch (e) {
+            userThumb = null;
+        }
+        
+        const menuMessage = {
+            text: menuText,
+            contextInfo: {
+                externalAdReply: {
+                    title: config.botName,
+                    body: `© ${config.ownerName}`,
+                    thumbnail: userThumb,
+                    sourceUrl: `https://wa.me/${config.ownerNumber}`,
+                    mediaType: 1
+                }
+            }
+        };
+        
+        if (userThumb) {
+            await sock.sendMessage(message.from, menuMessage, { quoted: message });
+        } else {
+            await message.reply(menuText);
+        }
     }
 };

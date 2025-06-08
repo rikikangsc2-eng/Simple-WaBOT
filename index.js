@@ -4,7 +4,10 @@ const { Boom } = require('@hapi/boom');
 const path = require('path');
 const readline = require('readline');
 const http = require('http');
+const fs = require('fs');
 const handler = require('./handler');
+const config = require('./config');
+const { getBuffer } = require('./lib/functions');
 
 const sessionPath = path.join(__dirname, 'session');
 const logger = pino({ level: 'silent' });
@@ -17,6 +20,59 @@ const rl = readline.createInterface({
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 const minReconnectDelay = 10000;
 const maxReconnectDelay = 30000;
+
+async function handleGroupUpdate(sock, event) {
+    const { id, participants, action } = event;
+    if (action !== 'add') return;
+    
+    const dbPath = path.join(__dirname, 'database/groupSettings.json');
+    if (!fs.existsSync(dbPath)) return;
+    
+    try {
+        const settings = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+        const groupSetting = settings[id];
+        
+        if (!groupSetting || !groupSetting.isWelcomeEnabled) return;
+        
+        const groupMeta = await sock.groupMetadata(id);
+        const groupName = groupMeta.subject;
+        
+        for (const jid of participants) {
+            const welcomeText = groupSetting.welcomeMessage
+                .replace(/\$group/g, groupName)
+                .replace(/@user/g, `@${jid.split('@')[0]}`);
+            
+            let userThumb;
+            try {
+                const ppUrl = await sock.profilePictureUrl(jid, 'image');
+                userThumb = await getBuffer(ppUrl);
+            } catch (e) {
+                userThumb = null;
+            }
+            
+            const messageOptions = {
+                text: welcomeText,
+                mentions: [jid]
+            };
+            
+            if (userThumb) {
+                messageOptions.contextInfo = {
+                    externalAdReply: {
+                        title: config.botName,
+                        body: 'Selamat Datang!',
+                        thumbnail: userThumb,
+                        sourceUrl: `https://wa.me/${config.ownerNumber}`,
+                        mediaType: 1
+                    }
+                };
+            }
+            
+            await sock.sendMessage(id, messageOptions);
+        }
+    } catch (e) {
+        console.error('Gagal memproses event group update:', e);
+    }
+}
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
@@ -53,7 +109,7 @@ async function connectToWhatsApp() {
     
     if (process.stdin.isTTY && !sock.authState.creds.registered) {
         console.log('Tidak ada sesi ditemukan, menggunakan Pairing Code.');
-        const phoneNumber = await question('Masukkan nomor WhatsApp Anda (contoh: 6283894391287): ');
+        const phoneNumber = await question('Masukkan nomor WhatsApp Anda (contoh: 6281234567890): ');
         const pairingCode = await sock.requestPairingCode(phoneNumber.trim());
         console.log(`Kode Pairing Anda: ${pairingCode}`);
     }
@@ -66,6 +122,10 @@ async function connectToWhatsApp() {
         } catch (e) {
             console.error(e);
         }
+    });
+    
+    sock.ev.on('group-participants.update', async (event) => {
+        await handleGroupUpdate(sock, event);
     });
     
     return sock;
