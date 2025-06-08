@@ -9,9 +9,6 @@ npm install --production
 
 COPY . .
 
-RUN mkdir -p session && \
-chown -R node:node /app
-
 USER node
 
 EXPOSE 3000
