@@ -58,7 +58,7 @@ async function connectToWhatsApp() {
     sock.ev.on('messages.upsert', async (mek) => {
         try {
             const m = mek.messages[0];
-            if (!m.message || m.key.fromMe || m.key.remoteJid === 'status@broadcast') return;
+            if (!m.message || m.key.remoteJid === 'status@broadcast') return;
             await handler(sock, m);
         } catch (e) {
             console.error(e);
