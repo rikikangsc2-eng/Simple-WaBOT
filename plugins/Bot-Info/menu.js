@@ -23,7 +23,7 @@ module.exports = {
 
         const pluginsDir = path.join(__dirname, '..'); // <-- PATH BERUBAH
         const commandCategories = {};
-        const categoryOrder = ['Owner', 'AI', 'Downloader', 'Tools', 'Fun', 'Lainnya'];
+        const categoryOrder = ['Bot-Info', 'Owner', 'AI', 'Downloader', 'Tools', 'Fun'];
 
         fs.readdirSync(pluginsDir).forEach(category => {
             const categoryDir = path.join(pluginsDir, category);

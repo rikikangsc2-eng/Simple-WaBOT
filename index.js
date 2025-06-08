@@ -15,6 +15,8 @@ const rl = readline.createInterface({
 });
 
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
+const minReconnectDelay = 10000;
+const maxReconnectDelay = 30000;
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
@@ -42,15 +44,16 @@ async function connectToWhatsApp() {
                 console.log('Koneksi terputus, kredensial tidak valid. Harap hapus folder session dan mulai ulang.');
                 process.exit(1);
             } else {
-                console.log('Koneksi terputus, mencoba menyambungkan kembali...');
-                setTimeout(connectToWhatsApp, 5000);
+                const reconnectDelay = Math.floor(Math.random() * (maxReconnectDelay - minReconnectDelay + 1)) + minReconnectDelay;
+                console.log(`Koneksi terputus, mencoba menyambungkan kembali dalam ${reconnectDelay / 1000} detik...`);
+                setTimeout(connectToWhatsApp, reconnectDelay);
             }
         }
     });
     
     if (process.stdin.isTTY && !sock.authState.creds.registered) {
         console.log('Tidak ada sesi ditemukan, menggunakan Pairing Code.');
-        const phoneNumber = await question('Masukkan nomor WhatsApp Anda (contoh: 6281234567890): ');
+        const phoneNumber = await question('Masukkan nomor WhatsApp Anda (contoh: 6283894391287): ');
         const pairingCode = await sock.requestPairingCode(phoneNumber.trim());
         console.log(`Kode Pairing Anda: ${pairingCode}`);
     }
@@ -83,7 +86,7 @@ const server = http.createServer((req, res) => {
         return;
     }
     
-    res.writeHead(302, { 'Location': redirectUrl+req.url });
+    res.writeHead(302, { 'Location': redirectUrl + req.url });
     res.end();
 });
 
