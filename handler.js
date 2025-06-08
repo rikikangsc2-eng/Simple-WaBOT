@@ -25,10 +25,49 @@ fs.readdirSync(pluginsDir).forEach(category => {
     }
 });
 
+function formatAfkDuration(ms) {
+    const seconds = Math.floor((ms / 1000) % 60);
+    const minutes = Math.floor((ms / (1000 * 60)) % 60);
+    const hours = Math.floor((ms / (1000 * 60 * 60)) % 24);
+    const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+    
+    let duration = [];
+    if (days > 0) duration.push(`${days} hari`);
+    if (hours > 0) duration.push(`${hours} jam`);
+    if (minutes > 0) duration.push(`${minutes} menit`);
+    if (seconds > 0) duration.push(`${seconds} detik`);
+    
+    return duration.join(', ') || 'beberapa saat';
+}
+
 module.exports = async (sock, m) => {
     if (!m) return;
-    
     const message = await serialize(sock, m);
+    
+    const dbDir = path.join(__dirname, 'database');
+    if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir);
+    const afkPath = path.join(dbDir, 'afk.json');
+    if (!fs.existsSync(afkPath)) fs.writeFileSync(afkPath, '{}');
+    
+    let afkData = JSON.parse(fs.readFileSync(afkPath));
+    const mentionedJids = message.msg?.contextInfo?.mentionedJid || [];
+    
+    if (afkData[message.sender]) {
+        const afkInfo = afkData[message.sender];
+        const duration = formatAfkDuration(Date.now() - afkInfo.time);
+        await message.reply(`👋 *Selamat datang kembali!*\n\nAnda telah AFK selama *${duration}*.`);
+        delete afkData[message.sender];
+        fs.writeFileSync(afkPath, JSON.stringify(afkData, null, 2));
+    }
+    
+    for (const jid of mentionedJids) {
+        if (afkData[jid]) {
+            const afkInfo = afkData[jid];
+            const duration = formatAfkDuration(Date.now() - afkInfo.time);
+            const response = `🤫 Jangan ganggu dia!\n\n*User:* @${jid.split('@')[0]}\n*Status:* AFK sejak *${duration}* lalu\n*Alasan:* ${afkInfo.reason}`;
+            await sock.sendMessage(message.from, { text: response, mentions: [jid] }, { quoted: message });
+        }
+    }
     
     if (config.autoRead) {
         await sock.readMessages([message.key]);
@@ -54,7 +93,6 @@ module.exports = async (sock, m) => {
         if (config.autoTyping) {
             await sock.sendPresenceUpdate('composing', message.from);
         }
-        
         try {
             await plugin.run(sock, message, args);
         } catch (e) {
