@@ -3,7 +3,7 @@ const path = require('path');
 const chalk = require('chalk');
 const config = require('./config');
 const { serialize } = require('./lib/serialize');
-const db = require('../lib/database');
+const db = require('./lib/database');
 
 const plugins = new Map();
 const pluginsDir = path.join(__dirname, 'plugins');
