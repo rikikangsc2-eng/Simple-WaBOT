@@ -27,6 +27,11 @@ module.exports = {
     try {
       const response = await axios.get('https://raw.githubusercontent.com/BochilTeam/database/refs/heads/master/games/susunkata.json');
       const data = response.data;
+      
+      if (!Array.isArray(data) || data.length === 0) {
+        return message.reply('Gagal memulai game, format data soal tidak valid.');
+      }
+      
       const randomIndex = Math.floor(Math.random() * data.length);
       const gameData = data[randomIndex];
       

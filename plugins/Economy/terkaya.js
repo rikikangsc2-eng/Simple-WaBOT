@@ -12,7 +12,7 @@ module.exports = {
     try { usersData = JSON.parse(fs.readFileSync(dbPath, 'utf8')); } catch {}
     
     const sortedUsers = Object.entries(usersData)
-      .filter(([jid, data]) => data.money > 0)
+      .filter(([jid, data]) => data.money > 0 && jid.endsWith('@s.whatsapp.net'))
       .sort(([, a], [, b]) => b.money - a.money)
       .slice(0, 10);
     

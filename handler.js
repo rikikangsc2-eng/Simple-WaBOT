@@ -100,7 +100,7 @@ module.exports = async (sock, m) => {
     let usersData = JSON.parse(fs.readFileSync(usersPath));
     let gameSessions = JSON.parse(fs.readFileSync(gameSessionsPath));
     
-    if (!usersData[message.sender]) {
+    if (message.sender.endsWith('@s.whatsapp.net') && !usersData[message.sender]) {
         usersData[message.sender] = { money: 1000 };
         fs.writeFileSync(usersPath, JSON.stringify(usersData, null, 2));
     }
@@ -133,7 +133,7 @@ module.exports = async (sock, m) => {
         }
     }
     
-    if (gameSessions[message.from] && message.body && message.body.toUpperCase() === gameSessions[message.from].answer.toUpperCase()) {
+    if (gameSessions[message.from] && message.body && message.body.trim().toUpperCase() === gameSessions[message.from].answer.toUpperCase()) {
         const session = gameSessions[message.from];
         clearTimeout(session.timeout);
         
@@ -145,6 +145,7 @@ module.exports = async (sock, m) => {
         
         delete gameSessions[message.from];
         fs.writeFileSync(gameSessionsPath, JSON.stringify(gameSessions, null, 2));
+        return;
     }
     
     await handleAntiLink(sock, message, groupSettingsData);
