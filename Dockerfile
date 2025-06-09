@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY package.json ./
 
-RUN apk add --no-cache git && \
+RUN apk add --no-cache git ffmpeg && \
 npm install --production
 
 COPY . .
