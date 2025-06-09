@@ -3,6 +3,7 @@ const path = require('path');
 const chalk = require('chalk');
 const config = require('./config');
 const { serialize } = require('./lib/serialize');
+const db = require('../lib/database');
 
 const plugins = new Map();
 const pluginsDir = path.join(__dirname, 'plugins');
@@ -83,15 +84,8 @@ module.exports = async (sock, m) => {
         console.log(log);
     }
     
-    const dbDir = path.join(__dirname, 'database');
-    if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir);
-    const afkPath = path.join(dbDir, 'afk.json');
-    if (!fs.existsSync(afkPath)) fs.writeFileSync(afkPath, '{}');
-    const groupSettingsPath = path.join(dbDir, 'groupSettings.json');
-    if (!fs.existsSync(groupSettingsPath)) fs.writeFileSync(groupSettingsPath, '{}');
-    
-    let afkData = JSON.parse(fs.readFileSync(afkPath));
-    let groupSettingsData = JSON.parse(fs.readFileSync(groupSettingsPath));
+    let afkData = db.get('afk');
+    let groupSettingsData = db.get('groupSettings');
     
     await handleAntiLink(sock, message, groupSettingsData);
     
@@ -108,7 +102,7 @@ module.exports = async (sock, m) => {
         const duration = formatAfkDuration(Date.now() - afkInfo.time);
         await message.reply(`👋 *Selamat datang kembali!*\n\nAnda telah AFK selama *${duration}*.`);
         delete afkData[message.sender];
-        fs.writeFileSync(afkPath, JSON.stringify(afkData, null, 2));
+        db.save('afk', afkData);
     }
     
     for (const jid of jidsToCheck) {

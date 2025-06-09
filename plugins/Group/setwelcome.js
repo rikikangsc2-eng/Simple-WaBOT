@@ -1,19 +1,4 @@
-const fs = require('fs');
-const path = require('path');
-
-const dbPath = path.join(__dirname, '../../database/groupSettings.json');
-
-function getGroupSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-  } catch (e) {
-    return {};
-  }
-}
-
-function saveGroupSettings(data) {
-  fs.writeFileSync(dbPath, JSON.stringify(data, null, 2));
-}
+const db = require('../../lib/database');
 
 module.exports = {
   command: 'setwelcome',
@@ -32,13 +17,13 @@ module.exports = {
       return message.reply('Gunakan format: *.setwelcome <teks>*\nContoh: .setwelcome Halo @user, selamat datang di $group!');
     }
     
-    const settings = getGroupSettings();
+    const settings = db.get('groupSettings');
     if (!settings[message.from]) {
       settings[message.from] = { isWelcomeEnabled: false };
     }
     
     settings[message.from].welcomeMessage = newText;
-    saveGroupSettings(settings);
+    db.save('groupSettings', settings);
     
     await message.reply(`Pesan selamat datang berhasil diatur.`);
   }

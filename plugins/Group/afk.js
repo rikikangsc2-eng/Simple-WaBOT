@@ -1,5 +1,4 @@
-const fs = require('fs');
-const path = require('path');
+const db = require('../../lib/database');
 
 module.exports = {
   command: 'afk',
@@ -9,19 +8,9 @@ module.exports = {
     const reason = args.join(' ') || 'Tanpa alasan';
     const time = Date.now();
     
-    const dbPath = path.join(__dirname, '../../database/afk.json');
-    
-    let afkData = {};
-    try {
-      const fileData = fs.readFileSync(dbPath, 'utf8');
-      afkData = JSON.parse(fileData);
-    } catch (e) {
-      console.log("Membuat file afk.json baru.");
-    }
-    
+    let afkData = db.get('afk');
     afkData[userJid] = { reason, time };
-    
-    fs.writeFileSync(dbPath, JSON.stringify(afkData, null, 2));
+    db.save('afk', afkData);
     
     const afkMessage = `✅ *Anda sekarang AFK*\n\n*Alasan:* ${reason}`;
     await message.reply(afkMessage);
