@@ -16,7 +16,7 @@ function formatUptime(seconds) {
 }
 
 module.exports = {
-    command: 'menu',
+    command: ['menu', 'help'],
     description: 'Menampilkan semua fitur yang tersedia.',
     run: async (sock, message, args) => {
         const usedMem = process.memoryUsage().heapUsed / 1024 / 1024;
@@ -24,25 +24,37 @@ module.exports = {
         
         const pluginsDir = path.join(__dirname, '..');
         const commandCategories = {};
-        const categoryOrder = ['Bot-Info', 'Owner', 'AI', 'Group', 'Downloader', 'Tools', 'Fun', 'Other'];
         
         fs.readdirSync(pluginsDir).forEach(category => {
             const categoryDir = path.join(pluginsDir, category);
             if (fs.statSync(categoryDir).isDirectory()) {
-                commandCategories[category] = [];
+                const plugins = [];
                 fs.readdirSync(categoryDir).forEach(file => {
                     if (path.extname(file) !== '.js') return;
                     try {
                         const pluginPath = path.join(categoryDir, file);
                         const plugin = require(pluginPath);
                         if (plugin.command && plugin.description) {
-                            commandCategories[category].push(plugin);
+                            plugins.push(plugin);
                         }
                     } catch (e) {
                         console.error(`Gagal memuat info plugin dari ${file}`);
                     }
                 });
+                if (plugins.length > 0) {
+                    commandCategories[category] = plugins;
+                }
             }
+        });
+        
+        const priorityCategories = ['Owner', 'Group', 'AI', 'Downloader', 'Tools'];
+        const sortedCategories = Object.keys(commandCategories).sort((a, b) => {
+            const indexA = priorityCategories.indexOf(a);
+            const indexB = priorityCategories.indexOf(b);
+            if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+            if (indexA !== -1) return -1;
+            if (indexB !== -1) return 1;
+            return a.localeCompare(b);
         });
         
         let menuText = `*Hai, ${message.pushName || 'User'}!*
@@ -54,14 +66,13 @@ Bot ini siap membantu Anda.
 │ ❖ *RAM* : ${usedMem.toFixed(2)} MB
 └─\n\n`;
         
-        for (const category of categoryOrder) {
-            if (commandCategories[category] && commandCategories[category].length > 0) {
-                menuText += `┌─「 *${category}* 」\n`;
-                commandCategories[category].forEach(plugin => {
-                    menuText += `│ ❖ ${config.prefix}${plugin.command}\n`;
-                });
-                menuText += `└─\n\n`;
-            }
+        for (const category of sortedCategories) {
+            menuText += `┌─「 *${category}* 」\n`;
+            commandCategories[category].forEach(plugin => {
+                const mainCommand = Array.isArray(plugin.command) ? plugin.command[0] : plugin.command;
+                menuText += `│ ❖ ${config.prefix}${mainCommand}\n`;
+            });
+            menuText += `└─\n\n`;
         }
         
         menuText += `Ketik *.command* untuk menggunakan fitur.`;
