@@ -46,18 +46,18 @@ async function handleGroupUpdate(sock, event) {
             
             const messageOptions = {
                 text: welcomeText,
-                mentions: [jid]
+                contextInfo: {
+                    mentionedJid: [jid]
+                }
             };
             
             if (userThumb) {
-                messageOptions.contextInfo = {
-                    externalAdReply: {
-                        title: config.botName,
-                        body: 'Selamat Datang!',
-                        thumbnail: userThumb,
-                        sourceUrl: `https://wa.me/${config.ownerNumber}`,
-                        mediaType: 1
-                    }
+                messageOptions.contextInfo.externalAdReply = {
+                    title: config.botName,
+                    body: 'Selamat Datang!',
+                    thumbnail: userThumb,
+                    sourceUrl: `https://wa.me/${config.ownerNumber}`,
+                    mediaType: 1
                 };
             }
             
