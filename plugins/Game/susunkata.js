@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const gameSessionsPath = path.join(__dirname, '../../database/gameSessions.json');
+const activeTimeouts = {};
 
 function getGameSessions() {
   try { return JSON.parse(fs.readFileSync(gameSessionsPath, 'utf8')); }
@@ -13,9 +14,33 @@ function saveGameSessions(data) {
   fs.writeFileSync(gameSessionsPath, JSON.stringify(data, null, 2));
 }
 
+function loadActiveTimeouts(sock) {
+  const sessions = getGameSessions();
+  for (const jid in sessions) {
+    if (sessions[jid]) {
+      const session = sessions[jid];
+      const timePassed = Date.now() - session.startTime;
+      const timeLeft = 60000 - timePassed;
+      
+      if (timeLeft > 0) {
+        activeTimeouts[jid] = setTimeout(() => {
+          sock.sendMessage(jid, { text: `Waktu habis! Jawaban yang benar adalah *${session.answer}*.` });
+          delete sessions[jid];
+          saveGameSessions(sessions);
+          delete activeTimeouts[jid];
+        }, timeLeft);
+      } else {
+        delete sessions[jid];
+        saveGameSessions(sessions);
+      }
+    }
+  }
+}
+
 module.exports = {
   command: 'susunkata',
   description: 'Bermain game susun kata.',
+  init: loadActiveTimeouts,
   run: async (sock, message, args) => {
     if (!message.isGroup) return message.reply('Game hanya bisa dimainkan di dalam grup.');
     
@@ -41,17 +66,18 @@ module.exports = {
         answer: gameData.jawaban,
         clue: gameData.tipe,
         reward: Math.floor(Math.random() * 500) + 500,
-        timeout: null
+        startTime: Date.now()
       };
       
       const gameMessage = `🔠 *Game Susun Kata* 🔠\n\nSusun kata berikut:\n*${gameData.soal}*\n\nTipe: *${gameData.tipe}*\nHadiah: *Rp ${sessions[message.from].reward}*`;
       await message.reply(gameMessage);
       
-      sessions[message.from].timeout = setTimeout(() => {
+      activeTimeouts[message.from] = setTimeout(() => {
         if (sessions[message.from]) {
           sock.sendMessage(message.from, { text: `Waktu habis! Jawaban yang benar adalah *${gameData.jawaban}*.` });
           delete sessions[message.from];
           saveGameSessions(sessions);
+          delete activeTimeouts[message.from];
         }
       }, 60000);
       

@@ -15,27 +15,40 @@ const logger = pino({ level: 'silent' });
 const minReconnectDelay = 10000;
 const maxReconnectDelay = 30000;
 
+function initializePlugins(sock) {
+    const pluginsDir = path.join(__dirname, 'plugins');
+    fs.readdirSync(pluginsDir).forEach(category => {
+        const categoryDir = path.join(pluginsDir, category);
+        if (fs.statSync(categoryDir).isDirectory()) {
+            fs.readdirSync(categoryDir).forEach(file => {
+                if (path.extname(file) === '.js') {
+                    try {
+                        const plugin = require(path.join(categoryDir, file));
+                        if (typeof plugin.init === 'function') {
+                            plugin.init(sock);
+                        }
+                    } catch (e) {
+                        console.error(`Gagal menginisialisasi plugin ${file}:`, e);
+                    }
+                }
+            });
+        }
+    });
+}
+
 async function handleGroupUpdate(sock, event) {
     const { id, participants, action } = event;
     if (action !== 'add') return;
-    
     const dbPath = path.join(__dirname, 'database/groupSettings.json');
     if (!fs.existsSync(dbPath)) return;
-    
     try {
         const settings = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
         const groupSetting = settings[id];
-        
         if (!groupSetting || !groupSetting.isWelcomeEnabled) return;
-        
         const groupMeta = await sock.groupMetadata(id);
         const groupName = groupMeta.subject;
-        
         for (const jid of participants) {
-            const welcomeText = groupSetting.welcomeMessage
-                .replace(/\$group/g, groupName)
-                .replace(/@user/g, `@${jid.split('@')[0]}`);
-            
+            const welcomeText = groupSetting.welcomeMessage.replace(/\$group/g, groupName).replace(/@user/g, `@${jid.split('@')[0]}`);
             let userThumb;
             try {
                 const ppUrl = await sock.profilePictureUrl(jid, 'image');
@@ -43,12 +56,7 @@ async function handleGroupUpdate(sock, event) {
             } catch (e) {
                 userThumb = null;
             }
-            
-            const messageOptions = {
-                text: welcomeText,
-                mentions: [jid]
-            };
-            
+            const messageOptions = { text: welcomeText, mentions: [jid] };
             if (userThumb) {
                 messageOptions.contextInfo = {
                     externalAdReply: {
@@ -60,7 +68,6 @@ async function handleGroupUpdate(sock, event) {
                     }
                 };
             }
-            
             await sock.sendMessage(id, messageOptions);
         }
     } catch (e) {
@@ -70,7 +77,6 @@ async function handleGroupUpdate(sock, event) {
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
-    
     const sock = makeWASocket({
         auth: state,
         printQRInTerminal: false,
@@ -78,32 +84,23 @@ async function connectToWhatsApp() {
         logger,
     });
     
+    initializePlugins(sock);
     sock.ev.on('creds.update', saveCreds);
-    
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
-        
         if (connection === 'connecting') {
             console.log(chalk.yellow('Menghubungkan ke WhatsApp...'));
         } else if (connection === 'open') {
             console.log(chalk.green('Koneksi WhatsApp berhasil terbuka!'));
         } else if (connection === 'close') {
             const statusCode = new Boom(lastDisconnect.error)?.output?.statusCode;
-            
-            if (statusCode === DisconnectReason.loggedOut) {
+            if (statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession) {
                 console.log(chalk.red('Koneksi terputus, kredensial tidak valid. Hapus folder session dan mulai ulang.'));
                 process.exit(1);
-            } else if (statusCode === DisconnectReason.badSession) {
-                console.log(chalk.red('Sesi tidak valid, harap hapus folder session dan mulai ulang.'));
-                process.exit(1);
             }
-            
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) {
-                const reconnectDelay = Math.floor(Math.random() * (maxReconnectDelay - minReconnectDelay + 1)) + minReconnectDelay;
-                console.log(chalk.yellow(`Koneksi terputus, mencoba menyambungkan kembali dalam ${reconnectDelay / 1000} detik...`));
-                setTimeout(connectToWhatsApp, reconnectDelay);
-            }
+            const reconnectDelay = Math.floor(Math.random() * (maxReconnectDelay - minReconnectDelay + 1)) + minReconnectDelay;
+            console.log(chalk.yellow(`Koneksi terputus, mencoba menyambungkan kembali dalam ${reconnectDelay / 1000} detik...`));
+            setTimeout(connectToWhatsApp, reconnectDelay);
         }
     });
     
@@ -113,14 +110,12 @@ async function connectToWhatsApp() {
             process.exit(1);
         }
         console.log(chalk.yellow(`Tidak ada sesi ditemukan. Meminta Pairing Code untuk nomor: ${config.botNumber}`));
-        
         setTimeout(async () => {
             try {
                 const pairingCode = await sock.requestPairingCode(config.botNumber);
                 console.log(chalk.green(`Kode Pairing Anda: ${chalk.bold(pairingCode)}`));
             } catch (error) {
                 console.error(chalk.red('Gagal meminta pairing code:'), error);
-                console.log(chalk.yellow('Mencoba menyambungkan kembali...'));
                 connectToWhatsApp();
             }
         }, 3000);
@@ -145,19 +140,16 @@ async function connectToWhatsApp() {
 
 const PORT = process.env.PORT || 3000;
 const redirectUrl = 'https://nirkyy-dev.hf.space';
-
 const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
     res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type');
     res.setHeader('Access-Control-Allow-Credentials', true);
-    
     if (req.method === 'OPTIONS') {
         res.writeHead(204);
         res.end();
         return;
     }
-    
     res.writeHead(302, { 'Location': redirectUrl + req.url });
     res.end();
 });
