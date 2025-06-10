@@ -1,0 +1,22 @@
+{
+  "name": "botcuys",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "wa-sticker-formatter": "^4.4.4",
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "npm:baileys@latest",
+    "chalk": "^4.1.2",
+    "pino": "^9.7.0",
+    "pino-pretty": "^11.0.0",
+    "sharp": "^0.32.6",
+    "undici-types": "^6.20.0"
+  },
+  "scripts": {
+    "start":"node --expose-gc index.js"
+  },
+  "keywords": [],
+  "author": "puruu",
+  "license": "ISC",
+  "description": "Bot WhatsApp Simple"
+}
