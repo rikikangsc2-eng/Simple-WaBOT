@@ -14,7 +14,7 @@ const logger = require('./lib/logger');
 const { loadPlugins } = require('./lib/pluginManager');
 
 const sessionPath = path.join(__dirname, 'session');
-const groupMetadataCache = new LRUCache({ max: 20 });
+const groupMetadataCache = new LRUCache({ max: 5 });
 
 const minReconnectDelay = 10000;
 const maxReconnectDelay = 30000;
