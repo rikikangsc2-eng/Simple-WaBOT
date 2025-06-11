@@ -9,6 +9,7 @@
     "chalk": "^4.1.2",
     "pino": "^9.7.0",
     "pino-pretty": "^11.0.0",
+    "jszip":"*",
     "sharp": "^0.32.6",
     "undici-types": "^6.20.0"
   },

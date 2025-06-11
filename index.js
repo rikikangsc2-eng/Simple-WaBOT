@@ -9,6 +9,7 @@ const config = require('./config');
 const { getBuffer } = require('./lib/functions');
 const db = require('./lib/database');
 const logger = require('./lib/logger');
+const { loadPlugins } = require('./lib/pluginManager');
 
 const sessionPath = path.join(__dirname, 'session');
 
@@ -180,4 +181,5 @@ server.listen(PORT, () => {
     logger.info(`Server status berjalan di port ${PORT}`);
 });
 
+loadPlugins();
 connectToWhatsApp().catch(err => logger.error("Gagal terhubung ke WhatsApp:", err));

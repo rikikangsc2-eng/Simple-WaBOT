@@ -1,9 +1,7 @@
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
 const process = require('process');
 const config = require('../../config');
 const { getBuffer } = require('../../lib/functions');
+const { plugins } = require('../../lib/pluginManager');
 
 function formatUptime(seconds) {
     function pad(s) {
@@ -21,33 +19,25 @@ module.exports = {
     run: async (sock, message, args) => {
         const usedMem = process.memoryUsage().heapUsed / 1024 / 1024;
         const uptime = process.uptime();
-        
-        const pluginsDir = path.join(__dirname, '..');
+
         const commandCategories = {};
-        
-        fs.readdirSync(pluginsDir).forEach(category => {
-            const categoryDir = path.join(pluginsDir, category);
-            if (fs.statSync(categoryDir).isDirectory()) {
-                const plugins = [];
-                fs.readdirSync(categoryDir).forEach(file => {
-                    if (path.extname(file) !== '.js') return;
-                    try {
-                        const pluginPath = path.join(categoryDir, file);
-                        const plugin = require(pluginPath);
-                        if (plugin.command && plugin.description) {
-                            plugins.push(plugin);
-                        }
-                    } catch (e) {
-                        console.error(`Gagal memuat info plugin dari ${file}`);
-                    }
-                });
-                if (plugins.length > 0) {
-                    commandCategories[category] = plugins;
-                }
+        const uniqueCommands = new Set();
+
+        plugins.forEach(plugin => {
+            if (!plugin.command || !plugin.description) return;
+
+            const mainCommand = Array.isArray(plugin.command) ? plugin.command[0] : plugin.command;
+            if (uniqueCommands.has(mainCommand)) return;
+            uniqueCommands.add(mainCommand);
+
+            const category = plugin.category || 'Uncategorized';
+            if (!commandCategories[category]) {
+                commandCategories[category] = [];
             }
+            commandCategories[category].push(mainCommand);
         });
-        
-        const priorityCategories = ['Owner', 'Group', 'AI', 'Downloader', 'Tools'];
+
+        const priorityCategories = ['Owner', 'Group', 'Game', 'Ekonomi'];
         const sortedCategories = Object.keys(commandCategories).sort((a, b) => {
             const indexA = priorityCategories.indexOf(a);
             const indexB = priorityCategories.indexOf(b);
@@ -56,7 +46,7 @@ module.exports = {
             if (indexB !== -1) return 1;
             return a.localeCompare(b);
         });
-        
+
         let menuText = `*Hai, ${message.pushName || 'User'}!*
 Bot ini siap membantu Anda.
 
@@ -65,18 +55,17 @@ Bot ini siap membantu Anda.
 │ ❖ *Uptime* : ${formatUptime(uptime)}
 │ ❖ *RAM* : ${usedMem.toFixed(2)} MB
 └─\n\n`;
-        
+
         for (const category of sortedCategories) {
             menuText += `┌─「 *${category}* 」\n`;
-            commandCategories[category].forEach(plugin => {
-                const mainCommand = Array.isArray(plugin.command) ? plugin.command[0] : plugin.command;
-                menuText += `│ ❖ ${config.prefix}${mainCommand}\n`;
+            commandCategories[category].forEach(command => {
+                menuText += `│ ❖ ${config.prefix}${command}\n`;
             });
             menuText += `└─\n\n`;
         }
-        
+
         menuText += `Ketik *.command* untuk menggunakan fitur.`;
-        
+
         let userThumb;
         try {
             const ppUrl = await sock.profilePictureUrl(message.sender, 'image');
@@ -84,7 +73,7 @@ Bot ini siap membantu Anda.
         } catch (e) {
             userThumb = null;
         }
-        
+
         const menuMessage = {
             text: menuText,
             contextInfo: {
@@ -97,11 +86,7 @@ Bot ini siap membantu Anda.
                 }
             }
         };
-        
-        if (userThumb) {
-            await sock.sendMessage(message.from, menuMessage, { quoted: message });
-        } else {
-            await message.reply(menuText);
-        }
+
+        await sock.sendMessage(message.from, menuMessage, { quoted: message });
     }
 };
