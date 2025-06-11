@@ -4,6 +4,8 @@ const { Boom } = require('@hapi/boom');
 const path = require('path');
 const http = require('http');
 const chalk = require('chalk');
+const fs = require('fs');
+const { LRUCache } = require('lru-cache');
 const handler = require('./handler');
 const config = require('./config');
 const { getBuffer } = require('./lib/functions');
@@ -12,11 +14,11 @@ const logger = require('./lib/logger');
 const { loadPlugins } = require('./lib/pluginManager');
 
 const sessionPath = path.join(__dirname, 'session');
+const groupMetadataCache = new LRUCache({ max: 20 });
 
 const minReconnectDelay = 10000;
 const maxReconnectDelay = 30000;
 let priceUpdateInterval = null;
-let lastConnectionState = null;
 
 function updateMarketPrices() {
     let market = db.get('market');
@@ -36,21 +38,26 @@ function updateMarketPrices() {
         if (newPrice < minPrices[item]) newPrice = minPrices[item];
         
         market[`${item}_price`] = newPrice;
-        logger.info(`[MARKET UPDATE] Harga ${item} diperbarui ke: Rp ${newPrice.toLocaleString()}`);
     });
 
     db.save('market', market);
+    logger.info('[MARKET UPDATE] Harga pasar berhasil diperbarui.');
 }
 
 async function handleGroupUpdate(sock, event) {
     const { id, participants, action } = event;
+    groupMetadataCache.delete(id);
     if (action !== 'add') return;
     
     const groupSettings = db.get('groupSettings');
     const groupSetting = groupSettings[id];
     if (!groupSetting || !groupSetting.isWelcomeEnabled) return;
     
-    const groupMeta = await sock.groupMetadata(id);
+    let groupMeta = groupMetadataCache.get(id);
+    if (!groupMeta) {
+        groupMeta = await sock.groupMetadata(id);
+        groupMetadataCache.set(id, groupMeta);
+    }
     const groupName = groupMeta.subject;
 
     for (const jid of participants) {
@@ -105,44 +112,44 @@ async function connectToWhatsApp() {
     
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
-        if (connection === lastConnectionState) return;
-
-        lastConnectionState = connection;
 
         if (connection === 'open') {
-            logger.info('Koneksi WhatsApp berhasil terbuka!');
+            console.log(chalk.green('\nKoneksi WhatsApp berhasil. Bot siap digunakan!'));
+            logger.info(`Terhubung sebagai ${sock.user.name || config.botName}`);
             if (priceUpdateInterval) clearInterval(priceUpdateInterval);
             updateMarketPrices();
             priceUpdateInterval = setInterval(updateMarketPrices, 5 * 60 * 1000);
         } else if (connection === 'close') {
             const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== DisconnectReason.badSession;
-            logger.warn(`Koneksi terputus (Kode: ${statusCode}), mencoba menyambungkan kembali...`);
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            logger.warn(`Koneksi terputus (Kode: ${statusCode}), mencoba menyambungkan kembali: ${shouldReconnect}`);
             
             if (shouldReconnect) {
                 const reconnectDelay = Math.floor(Math.random() * (maxReconnectDelay - minReconnectDelay + 1)) + minReconnectDelay;
                 setTimeout(connectToWhatsApp, reconnectDelay);
             } else {
-                 logger.error('Koneksi terputus permanen, harap periksa sesi atau kredensial.');
+                 console.log(chalk.red('Koneksi terputus permanen. Hapus folder "session" dan mulai ulang.'));
+                 logger.error('Koneksi terputus permanen (Logged Out).');
+                 if (fs.existsSync(sessionPath)) {
+                     fs.rmSync(sessionPath, { recursive: true, force: true });
+                 }
                  process.exit(1);
             }
         } else if (connection === 'connecting') {
             logger.info('Menghubungkan ke WhatsApp...');
         }
     });
-
-    if (!sock.authState.creds.registered) {
-        if (!config.botNumber) {
-            logger.error('Error: "botNumber" tidak diatur di config.js.');
-            process.exit(1);
-        }
-        logger.info(`Meminta Pairing Code untuk nomor: ${config.botNumber}`);
+    
+    if (!sock.authState.creds.registered && config.botNumber) {
+        console.log(chalk.yellow(`\nSesi tidak ditemukan. Meminta Kode Pairing untuk nomor ${config.botNumber}...`));
         setTimeout(async () => {
             try {
-                const pairingCode = await sock.requestPairingCode(config.botNumber);
-                console.log(chalk.green(`Kode Pairing Anda: ${chalk.bold(pairingCode)}`));
+                const code = await sock.requestPairingCode(config.botNumber);
+                console.log(chalk.green(`\nKode Pairing Anda: ${chalk.bold(code)}\n`));
+                console.log(chalk.gray('Silakan masukkan kode ini di perangkat WhatsApp Anda (Opsi -> Perangkat Tertaut -> Tautkan perangkat -> Tautkan dengan nomor telepon).'));
             } catch (error) {
                 logger.error('Gagal meminta pairing code:', error);
+                console.log(chalk.red('\nGagal mendapatkan Kode Pairing. Pastikan nomor bot benar dan coba lagi.'));
                 connectToWhatsApp();
             }
         }, 3000);
@@ -152,9 +159,9 @@ async function connectToWhatsApp() {
         try {
             const m = mek.messages[0];
             if (!m.message || m.key.fromMe || m.key.remoteJid === 'status@broadcast') return;
-            await handler(sock, m);
+            await handler(sock, m, { groupMetadataCache });
         } catch (e) {
-            logger.error(e);
+            logger.error(e, 'Error di messages.upsert');
         }
     });
 
@@ -166,20 +173,19 @@ async function connectToWhatsApp() {
 }
 
 const PORT = process.env.PORT || 3000;
-const server = http.createServer((req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    const responseBody = { 
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
         status: 'online', 
         uptime: formatUptime(process.uptime()), 
         message: `${config.botName} is running!` 
-    };
-    res.writeHead(200);
-    res.end(JSON.stringify(responseBody, null, 2));
-});
+    }));
+}).listen(PORT, () => logger.info(`Server status berjalan di port ${PORT}`));
 
-server.listen(PORT, () => {
-    logger.info(`Server status berjalan di port ${PORT}`);
-});
+console.clear();
+console.log(chalk.bold.cyan(config.botName));
+console.log(chalk.gray(`by ${config.ownerName}\n`));
+console.log(chalk.yellow('Menunggu koneksi WhatsApp...'));
 
 loadPlugins();
-connectToWhatsApp().catch(err => logger.error("Gagal terhubung ke WhatsApp:", err));
+connectToWhatsApp().catch(err => logger.error(err, "Gagal terhubung ke WhatsApp:"));

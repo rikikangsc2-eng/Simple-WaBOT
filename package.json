@@ -8,10 +8,9 @@
     "@whiskeysockets/baileys": "npm:baileys@latest",
     "chalk": "^4.1.2",
     "pino": "^9.7.0",
-    "pino-pretty": "^11.0.0",
-    "jszip":"*",
-    "sharp": "^0.32.6",
-    "undici-types": "^6.20.0"
+    "lru-cache": "^11.1.0",
+    "pino-pretty": "^13.0.0",
+    "jszip":"^3.10.1"
   },
   "scripts": {
     "start":"node --expose-gc index.js"

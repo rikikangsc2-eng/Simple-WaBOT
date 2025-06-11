@@ -37,7 +37,7 @@ module.exports = {
             commandCategories[category].push(mainCommand);
         });
 
-        const priorityCategories = ['Owner', 'Group', 'Game', 'Ekonomi'];
+        const priorityCategories = ['Owner', 'Group', 'Game', 'RPG'];
         const sortedCategories = Object.keys(commandCategories).sort((a, b) => {
             const indexA = priorityCategories.indexOf(a);
             const indexB = priorityCategories.indexOf(b);

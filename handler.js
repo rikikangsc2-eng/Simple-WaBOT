@@ -44,27 +44,25 @@ function formatAfkDuration(ms) {
     return duration.join(', ') || 'beberapa saat';
 }
 
-async function handleAntiLink(sock, message, settings) {
-    if (!message.isGroup || !message.body) return;
-    const groupSetting = settings[message.from];
+async function handleAntiLink(sock, message, groupMetadata) {
+    if (!message.isGroup || !message.body || !groupMetadata) return;
+    
+    const groupSettings = db.get('groupSettings');
+    const groupSetting = groupSettings[message.from];
     if (!groupSetting || !groupSetting.isAntilinkEnabled) return;
 
     const linkRegex = /https:\/\/chat\.whatsapp\.com\/[a-zA-Z0-9]{22}/g;
     if (linkRegex.test(message.body)) {
-        const groupMeta = await sock.groupMetadata(message.from);
-        const sender = groupMeta.participants.find(p => p.id === message.sender);
+        const sender = groupMetadata.participants.find(p => p.id === message.sender);
         const isAdmin = sender && (sender.admin === 'admin' || sender.admin === 'superadmin');
         const isOwner = message.sender.startsWith(config.ownerNumber);
 
         if (isAdmin || isOwner) return;
 
-        const bot = groupMeta.participants.find(p => p.id === sock.user.id.split(':')[0] + '@s.whatsapp.net');
+        const bot = groupMetadata.participants.find(p => p.id === sock.user.id.split(':')[0] + '@s.whatsapp.net');
         const isBotAdmin = bot && (bot.admin === 'admin' || bot.admin === 'superadmin');
 
-        if (!isBotAdmin) {
-            logger.warn(`Bot bukan admin di grup ${groupMeta.subject}, tidak bisa menjalankan anti link.`);
-            return;
-        }
+        if (!isBotAdmin) return;
 
         await message.reply('Terdeteksi link grup WhatsApp! Anda akan dikeluarkan.');
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -72,31 +70,36 @@ async function handleAntiLink(sock, message, settings) {
     }
 }
 
-const handler = async (sock, m) => {
+const handler = async (sock, m, { groupMetadataCache }) => {
     if (!m) return;
     const message = await serialize(sock, m);
+
+    let groupMetadata = null;
+    if (message.isGroup) {
+        if (groupMetadataCache.has(message.from)) {
+            groupMetadata = groupMetadataCache.get(message.from);
+        } else {
+            groupMetadata = await sock.groupMetadata(message.from);
+            groupMetadataCache.set(message.from, groupMetadata);
+        }
+    }
 
     if (message.body) {
         const from = message.pushName;
         const inType = message.isGroup ? 'Grup' : 'Pribadi';
-        const groupName = message.isGroup ? ` di ${(await sock.groupMetadata(message.from)).subject}` : '';
+        const groupName = message.isGroup ? ` di ${groupMetadata.subject}` : '';
         logger.info(`${inType} dari ${from}${groupName}: ${message.body}`);
     }
 
     if (await handleGame(sock, message)) return;
 
-    let afkData = db.get('afk');
-    let groupSettingsData = db.get('groupSettings');
-
-    await handleAntiLink(sock, message, groupSettingsData);
+    await handleAntiLink(sock, message, groupMetadata);
 
     const mentionedJids = message.msg?.contextInfo?.mentionedJid || [];
     const quotedUserJid = message.msg?.contextInfo?.participant;
-    const jidsToCheck = [...mentionedJids];
-
-    if (quotedUserJid && !jidsToCheck.includes(quotedUserJid)) {
-        jidsToCheck.push(quotedUserJid);
-    }
+    const jidsToCheck = [...new Set([...mentionedJids, quotedUserJid].filter(Boolean))];
+    
+    const afkData = db.get('afk');
 
     if (afkData[message.sender]) {
         const afkInfo = afkData[message.sender];
@@ -131,7 +134,6 @@ const handler = async (sock, m) => {
 
     const args = message.body.slice(config.prefix.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
-
     const plugin = plugins.get(command);
 
     if (plugin) {
@@ -139,7 +141,7 @@ const handler = async (sock, m) => {
             await sock.sendPresenceUpdate('composing', message.from);
         }
         try {
-            await plugin.run(sock, message, args, { activeGames });
+            await plugin.run(sock, message, args, { activeGames, groupMetadata });
         } catch (e) {
             logger.error(`Error saat menjalankan plugin ${command}:`, e);
             message.reply(`Terjadi kesalahan: ${e.message}`);
