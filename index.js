@@ -11,11 +11,10 @@ const { getBuffer } = require('./lib/functions');
 const db = require('./lib/database');
 const logger = require('./lib/logger');
 const { loadPlugins } = require('./lib/pluginManager');
+const { setConnectionStatus, processQueue } = require('./lib/connectionManager');
 
 const sessionPath = path.join(__dirname, 'session');
 
-const minReconnectDelay = 10000;
-const maxReconnectDelay = 30000;
 let priceUpdateInterval = null;
 
 function updateMarketPrices() {
@@ -92,6 +91,10 @@ function formatUptime(seconds) {
     return `${pad(hours)}h ${pad(minutes)}m ${pad(secs)}s`;
 }
 
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const INITIAL_RECONNECT_DELAY = 5000;
+
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
     const sock = makeWASocket({ 
@@ -107,22 +110,30 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect } = update;
 
         if (connection === 'open') {
+            reconnectAttempts = 0;
+            setConnectionStatus(true);
             console.log(chalk.green('\nKoneksi WhatsApp berhasil. Bot siap digunakan!'));
             logger.info(`Terhubung sebagai ${sock.user.name || config.botName}`);
+            
             if (priceUpdateInterval) clearInterval(priceUpdateInterval);
             updateMarketPrices();
             priceUpdateInterval = setInterval(updateMarketPrices, 5 * 60 * 1000);
+            
+            processQueue(sock);
         } else if (connection === 'close') {
+            setConnectionStatus(false);
             const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             logger.warn(`Koneksi terputus (Kode: ${statusCode}), mencoba menyambungkan kembali: ${shouldReconnect}`);
             
-            if (shouldReconnect) {
-                const reconnectDelay = Math.floor(Math.random() * (maxReconnectDelay - minReconnectDelay + 1)) + minReconnectDelay;
-                setTimeout(connectToWhatsApp, reconnectDelay);
+            if (shouldReconnect && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttempts++;
+                const delay = INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
+                logger.info(`Mencoba koneksi ulang dalam ${delay / 1000} detik (Percobaan ke-${reconnectAttempts})...`);
+                setTimeout(connectToWhatsApp, delay);
             } else {
-                 console.log(chalk.red('Koneksi terputus permanen. Hapus folder "session" dan mulai ulang.'));
-                 logger.error('Koneksi terputus permanen (Logged Out).');
+                 console.log(chalk.red('Koneksi terputus permanen atau gagal setelah beberapa kali percobaan. Hapus folder "session" dan mulai ulang.'));
+                 logger.error(`Gagal terhubung setelah ${reconnectAttempts} kali percobaan.`);
                  if (fs.existsSync(sessionPath)) {
                      fs.rmSync(sessionPath, { recursive: true, force: true });
                  }
