@@ -5,7 +5,6 @@ const path = require('path');
 const http = require('http');
 const chalk = require('chalk');
 const fs = require('fs');
-const { LRUCache } = require('lru-cache');
 const handler = require('./handler');
 const config = require('./config');
 const { getBuffer } = require('./lib/functions');
@@ -14,7 +13,6 @@ const logger = require('./lib/logger');
 const { loadPlugins } = require('./lib/pluginManager');
 
 const sessionPath = path.join(__dirname, 'session');
-const groupMetadataCache = new LRUCache({ max: 5 });
 
 const minReconnectDelay = 10000;
 const maxReconnectDelay = 30000;
@@ -22,12 +20,12 @@ let priceUpdateInterval = null;
 
 function updateMarketPrices() {
     let market = db.get('market');
-    const commodities = ['gold', 'iron', 'bara'];
+    const commodities = ['emas', 'iron', 'bara'];
     
     commodities.forEach(item => {
-        const basePrices = { gold: 75000, iron: 25000, bara: 15000 };
-        const fluctuations = { gold: 500, iron: 150, bara: 100 };
-        const minPrices = { gold: 5000, iron: 1000, bara: 500 };
+        const basePrices = { emas: 75000, iron: 25000, bara: 15000 };
+        const fluctuations = { emas: 500, iron: 150, bara: 100 };
+        const minPrices = { emas: 5000, iron: 1000, bara: 500 };
         
         const oldPrice = market[`${item}_price`] || basePrices[item];
         market[`last_${item}_price`] = oldPrice;
@@ -46,18 +44,13 @@ function updateMarketPrices() {
 
 async function handleGroupUpdate(sock, event) {
     const { id, participants, action } = event;
-    groupMetadataCache.delete(id);
     if (action !== 'add') return;
     
     const groupSettings = db.get('groupSettings');
     const groupSetting = groupSettings[id];
     if (!groupSetting || !groupSetting.isWelcomeEnabled) return;
     
-    let groupMeta = groupMetadataCache.get(id);
-    if (!groupMeta) {
-        groupMeta = await sock.groupMetadata(id);
-        groupMetadataCache.set(id, groupMeta);
-    }
+    const groupMeta = await sock.groupMetadata(id);
     const groupName = groupMeta.subject;
 
     for (const jid of participants) {
@@ -159,7 +152,7 @@ async function connectToWhatsApp() {
         try {
             const m = mek.messages[0];
             if (!m.message || m.key.fromMe || m.key.remoteJid === 'status@broadcast') return;
-            await handler(sock, m, { groupMetadataCache });
+            await handler(sock, m, {});
         } catch (e) {
             logger.error(e, 'Error di messages.upsert');
         }

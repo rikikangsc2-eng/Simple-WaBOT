@@ -5,6 +5,81 @@ const logger = require('./lib/logger');
 const { plugins } = require('./lib/pluginManager');
 
 const activeGames = new Map();
+const activeBombGames = new Map();
+
+const generateBombBoard = (boxes) => {
+    let board = '';
+    for (let i = 0; i < boxes.length; i++) {
+        board += boxes[i];
+        if ((i + 1) % 3 === 0) {
+            board += '\n';
+        } else {
+            board += ' ';
+        }
+    }
+    return board;
+};
+
+const numberToEmoji = (n) => {
+    const emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'];
+    return emojis[n] || `${n+1}️⃣`;
+};
+
+async function handleBombGame(sock, message) {
+    if (!message.isGroup || !message.msg?.contextInfo?.quotedMessage) return false;
+
+    const game = activeBombGames.get(message.from);
+    if (!game || message.msg.contextInfo.stanzaId !== game.messageID) return false;
+    
+    if (message.sender !== game.turn) {
+        return true; 
+    }
+
+    const choice = parseInt(message.body.trim()) - 1;
+    if (isNaN(choice) || choice < 0 || choice > 8) return true;
+
+    if (game.boxes[choice] !== numberToEmoji(choice)) {
+        message.reply('Kotak itu sudah dibuka, pilih yang lain!');
+        return true;
+    }
+
+    let usersDb = db.get('users');
+    if (game.bombIndexes.includes(choice)) {
+        const winnerJid = (message.sender === game.challengerJid) ? game.targetJid : game.challengerJid;
+        const loserJid = message.sender;
+
+        usersDb[winnerJid].balance += game.amount;
+        usersDb[loserJid].balance -= game.amount;
+        db.save('users', usersDb);
+
+        for (let i = 0; i < game.boxes.length; i++) {
+            game.boxes[i] = game.bombIndexes.includes(i) ? '💣' : '✅';
+        }
+
+        const endText = `*KABOOM!* 💣💥\n\n` +
+            `@${loserJid.split('@')[0]} menginjak bom!\n` +
+            `Pemenangnya adalah @${winnerJid.split('@')[0]} dan mendapatkan *Rp ${game.amount.toLocaleString()}*!\n\n` +
+            generateBombBoard(game.boxes);
+
+        await sock.sendMessage(message.from, { text: endText, mentions: [winnerJid, loserJid] });
+        activeBombGames.delete(message.from);
+    } else {
+        game.boxes[choice] = '✅';
+        game.turn = (message.sender === game.challengerJid) ? game.targetJid : game.challengerJid;
+        
+        const turnText = `*TEBAK BOM* 💣\n` +
+            `Taruhan: *Rp ${game.amount.toLocaleString()}*\n\n` +
+            generateBombBoard(game.boxes) +
+            `\nGiliran @${game.turn.split('@')[0]} untuk memilih kotak.\n\n` +
+            `_Balas pesan ini dengan nomor kotak._`;
+
+        const newMsg = await sock.sendMessage(message.from, { text: turnText, mentions: [game.turn] });
+        game.messageID = newMsg.key.id;
+        activeBombGames.set(message.from, game);
+    }
+    
+    return true;
+}
 
 async function handleGame(sock, message) {
     if (!message.isGroup || !activeGames.has(message.from)) return false;
@@ -70,18 +145,13 @@ async function handleAntiLink(sock, message, groupMetadata) {
     }
 }
 
-const handler = async (sock, m, { groupMetadataCache }) => {
+const handler = async (sock, m, options) => {
     if (!m) return;
     const message = await serialize(sock, m);
 
     let groupMetadata = null;
     if (message.isGroup) {
-        if (groupMetadataCache.has(message.from)) {
-            groupMetadata = groupMetadataCache.get(message.from);
-        } else {
-            groupMetadata = await sock.groupMetadata(message.from);
-            groupMetadataCache.set(message.from, groupMetadata);
-        }
+        groupMetadata = await sock.groupMetadata(message.from);
     }
 
     if (message.body) {
@@ -91,6 +161,7 @@ const handler = async (sock, m, { groupMetadataCache }) => {
         logger.info(`${inType} dari ${from}${groupName}: ${message.body}`);
     }
 
+    if (await handleBombGame(sock, message)) return;
     if (await handleGame(sock, message)) return;
 
     await handleAntiLink(sock, message, groupMetadata);
@@ -141,7 +212,7 @@ const handler = async (sock, m, { groupMetadataCache }) => {
             await sock.sendPresenceUpdate('composing', message.from);
         }
         try {
-            await plugin.run(sock, message, args, { activeGames, groupMetadata });
+            await plugin.run(sock, message, args, { activeGames, groupMetadata, activeBombGames });
         } catch (e) {
             logger.error(`Error saat menjalankan plugin ${command}:`, e);
             message.reply(`Terjadi kesalahan: ${e.message}`);

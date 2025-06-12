@@ -32,12 +32,7 @@ async function runDuelAnimation(sock, initialMessage, p1, p2, amount) {
     const mentions = [p1Jid, p2Jid];
     const p1Power = calculatePower(p1.data);
     const p2Power = calculatePower(p2.data);
-    const totalPower = p1Power + p2Power;
-    const p1WinChance = p1Power / totalPower;
-
-    const winner = Math.random() < p1WinChance ? p1 : p2;
-    const loser = winner.jid === p1.jid ? p2 : p1;
-
+    
     const attackPhrases = [
         "melemparkan sendal jepit legendaris", "menggunakan jurus 'Pukulan Seribu Bayangan'", "menyerang sambil teriak 'WIBUUU!'",
         "menggelitik lawan hingga tak berdaya", "mengeluarkan tatapan sinis yang menyakitkan", "melempar batu kerikil dengan presisi tinggi",
@@ -51,7 +46,6 @@ async function runDuelAnimation(sock, initialMessage, p1, p2, amount) {
 
     let p1HP = 100;
     let p2HP = 100;
-    let turn = Math.random() < 0.5 ? 1 : 2;
 
     const header = `🔥 *DUEL DIMULAI* 🔥\nTaruhan: *Rp ${amount.toLocaleString()}*\n`;
 
@@ -67,9 +61,10 @@ async function runDuelAnimation(sock, initialMessage, p1, p2, amount) {
     let actionMessage = "Para petarung saling menatap tajam, bersiap untuk ronde pertama!";
 
     while (p1HP > 0 && p2HP > 0) {
-        const attackerJid = turn % 2 !== 0 ? p1Jid : p2Jid;
-        const defenderJid = turn % 2 !== 0 ? p2Jid : p1Jid;
-        const attackerPower = turn % 2 !== 0 ? p1Power : p2Power;
+        const isP1Attacking = Math.random() < 0.5;
+        const attackerJid = isP1Attacking ? p1Jid : p2Jid;
+        const defenderJid = isP1Attacking ? p2Jid : p1Jid;
+        const attackerPower = isP1Attacking ? p1Power : p2Power;
 
         const baseDamage = Math.floor(Math.random() * 20) + 10;
         const equipmentBonus = Math.round(attackerPower / 5);
@@ -80,7 +75,7 @@ async function runDuelAnimation(sock, initialMessage, p1, p2, amount) {
         
         actionMessage = `💥 @${attackerJid.split('@')[0]} ${attackDesc}, namun @${defenderJid.split('@')[0]} ${defenseDesc}! Tetap terkena *${damage}* kerusakan!`;
 
-        if (turn % 2 !== 0) {
+        if (isP1Attacking) {
             p2HP -= damage;
         } else {
             p1HP -= damage;
@@ -94,17 +89,18 @@ async function runDuelAnimation(sock, initialMessage, p1, p2, amount) {
         await editMessage(`${header}\n${hpDisplay}\n\n${actionMessage}`);
         
         if (p1HP <= 0 || p2HP <= 0) break;
-        turn++;
     }
 
     const finalWinnerJid = p1HP > 0 ? p1Jid : p2Jid;
+    const finalLoserJid = p1HP > 0 ? p2Jid : p1Jid;
+
     const hpDisplay = `*@${p1Jid.split('@')[0]}:* ${createHealthBar(p1HP)}\n` +
                       `*@${p2Jid.split('@')[0]}:* ${createHealthBar(p2HP)}`;
     actionMessage = `🏆 *DUEL SELESAI!* Pemenangnya adalah @${finalWinnerJid.split('@')[0]}!`;
     
     let usersDb = db.get('users');
-    usersDb[winner.jid].balance += amount;
-    usersDb[loser.jid].balance -= amount;
+    usersDb[finalWinnerJid].balance += amount;
+    usersDb[finalLoserJid].balance -= amount;
     db.save('users', usersDb);
 
     await editMessage(`${header}\n${hpDisplay}\n\n${actionMessage}`);
