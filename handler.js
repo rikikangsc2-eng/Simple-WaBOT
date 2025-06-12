@@ -43,7 +43,9 @@ async function handleBombGame(sock, message) {
         return true;
     }
 
+    clearTimeout(game.timeout);
     let usersDb = db.get('users');
+    
     if (game.bombIndexes.includes(choice)) {
         const winnerJid = (message.sender === game.challengerJid) ? game.targetJid : game.challengerJid;
         const loserJid = message.sender;
@@ -52,14 +54,12 @@ async function handleBombGame(sock, message) {
         usersDb[loserJid].balance -= game.amount;
         db.save('users', usersDb);
 
-        for (let i = 0; i < game.boxes.length; i++) {
-            game.boxes[i] = game.bombIndexes.includes(i) ? '💣' : '✅';
-        }
+        game.boxes[choice] = '💣';
 
         const endText = `*KABOOM!* 💣💥\n\n` +
             `@${loserJid.split('@')[0]} menginjak bom!\n` +
             `Pemenangnya adalah @${winnerJid.split('@')[0]} dan mendapatkan *Rp ${game.amount.toLocaleString()}*!\n\n` +
-            generateBombBoard(game.boxes);
+            `*Papan Terakhir:*\n${generateBombBoard(game.boxes)}`;
 
         await sock.sendMessage(message.from, { text: endText, mentions: [winnerJid, loserJid] });
         activeBombGames.delete(message.from);
@@ -71,10 +71,33 @@ async function handleBombGame(sock, message) {
             `Taruhan: *Rp ${game.amount.toLocaleString()}*\n\n` +
             generateBombBoard(game.boxes) +
             `\nGiliran @${game.turn.split('@')[0]} untuk memilih kotak.\n\n` +
-            `_Balas pesan ini dengan nomor kotak._`;
+            `_Balas pesan ini dengan nomor kotak (Waktu 30 detik)._`;
 
         const newMsg = await sock.sendMessage(message.from, { text: turnText, mentions: [game.turn] });
         game.messageID = newMsg.key.id;
+
+        const newTimeout = setTimeout(() => {
+            const currentGame = activeBombGames.get(message.from);
+            if (currentGame && currentGame.messageID === newMsg.key.id) {
+                const winnerJid = (currentGame.turn === currentGame.challengerJid) ? currentGame.targetJid : currentGame.challengerJid;
+                const loserJid = currentGame.turn;
+                
+                let currentUsersDb = db.get('users');
+                currentUsersDb[winnerJid].balance += currentGame.amount;
+                currentUsersDb[loserJid].balance -= currentGame.amount;
+                db.save('users', currentUsersDb);
+
+                const endText = `*WAKTU HABIS!* ⏰\n\n` +
+                    `@${loserJid.split('@')[0]} tidak menjawab dalam 30 detik.\n` +
+                    `Pemenangnya adalah @${winnerJid.split('@')[0]} dan mendapatkan *Rp ${game.amount.toLocaleString()}*!\n\n` +
+                    `*Papan Terakhir:*\n${generateBombBoard(currentGame.boxes)}`;
+
+                sock.sendMessage(message.from, { text: endText, mentions: [winnerJid, loserJid] });
+                activeBombGames.delete(message.from);
+            }
+        }, 30000);
+
+        game.timeout = newTimeout;
         activeBombGames.set(message.from, game);
     }
     
