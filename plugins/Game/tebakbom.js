@@ -1,8 +1,13 @@
-const db = require('../../lib/database');
+const config = require('./config');
+const { serialize } = require('./lib/serialize');
+const db = require('./lib/database');
+const logger = require('./lib/logger');
+const { plugins } = require('./lib/pluginManager');
 
-const pendingBombGames = new Map();
+const activeGames = new Map();
+const activeBombGames = new Map();
 
-const generateBoard = (boxes) => {
+const generateBombBoard = (boxes) => {
     let board = '';
     for (let i = 0; i < boxes.length; i++) {
         board += boxes[i];
@@ -20,106 +25,197 @@ const numberToEmoji = (n) => {
     return emojis[n] || `${n+1}️⃣`;
 };
 
-module.exports = {
-    command: 'tebakbom',
-    description: 'Bermain tebak bom dengan taruhan melawan pemain lain.',
-    category: 'Game',
-    run: async (sock, message, args, { activeBombGames }) => {
-        const senderJid = message.sender;
-        const groupJid = message.from;
-        const action = args[0]?.toLowerCase();
+async function handleBombGame(sock, message) {
+    if (!message.isGroup || !message.msg?.contextInfo?.quotedMessage) return false;
 
-        if (activeBombGames.has(groupJid)) {
-            return message.reply('Sudah ada permainan yang sedang berlangsung di grup ini.');
+    const game = activeBombGames.get(message.from);
+    if (!game || message.msg.contextInfo.stanzaId !== game.messageID) return false;
+    
+    if (message.sender !== game.turn) {
+        return true; 
+    }
+
+    const choice = parseInt(message.body.trim()) - 1;
+    if (isNaN(choice) || choice < 0 || choice > 8) return true;
+
+    if (game.boxes[choice] !== numberToEmoji(choice)) {
+        message.reply('Kotak itu sudah dibuka, pilih yang lain!');
+        return true;
+    }
+
+    let usersDb = db.get('users');
+    if (game.bombIndexes.includes(choice)) {
+        const winnerJid = (message.sender === game.challengerJid) ? game.targetJid : game.challengerJid;
+        const loserJid = message.sender;
+
+        usersDb[winnerJid].balance += game.amount;
+        usersDb[loserJid].balance -= game.amount;
+        db.save('users', usersDb);
+
+        game.boxes[choice] = '💣';
+
+        const endText = `*KABOOM!* 💣💥\n\n` +
+            `@${loserJid.split('@')[0]} menginjak bom!\n` +
+            `Pemenangnya adalah @${winnerJid.split('@')[0]} dan mendapatkan *Rp ${game.amount.toLocaleString()}*!\n\n` +
+            generateBombBoard(game.boxes);
+
+        await sock.sendMessage(message.from, { text: endText, mentions: [winnerJid, loserJid] });
+        activeBombGames.delete(message.from);
+    } else {
+        game.boxes[choice] = '✅';
+        game.turn = (message.sender === game.challengerJid) ? game.targetJid : game.challengerJid;
+        
+        const turnText = `*TEBAK BOM* 💣\n` +
+            `Taruhan: *Rp ${game.amount.toLocaleString()}*\n\n` +
+            generateBombBoard(game.boxes) +
+            `\nGiliran @${game.turn.split('@')[0]} untuk memilih kotak.\n\n` +
+            `_Balas pesan ini dengan nomor kotak._`;
+
+        const newMsg = await sock.sendMessage(message.from, { text: turnText, mentions: [game.turn] });
+        game.messageID = newMsg.key.id;
+        activeBombGames.set(message.from, game);
+    }
+    
+    return true;
+}
+
+async function handleGame(sock, message) {
+    if (!message.isGroup || !activeGames.has(message.from)) return false;
+
+    const game = activeGames.get(message.from);
+    if (message.body.toLowerCase() !== game.jawaban.toLowerCase()) return false;
+
+    clearTimeout(game.timeout);
+
+    let usersDb = db.get('users');
+    if (!usersDb[message.sender]) {
+        usersDb[message.sender] = { balance: 0, name: message.pushName };
+    }
+    usersDb[message.sender].balance += game.hadiah;
+    usersDb[message.sender].name = message.pushName;
+    db.save('users', usersDb);
+
+    const winMessage = `🎉 *Selamat, ${message.pushName}!* Jawaban Anda benar.\n\nAnda mendapatkan *Rp ${game.hadiah.toLocaleString()}*`;
+    await message.reply(winMessage);
+
+    activeGames.delete(message.from);
+    return true;
+}
+
+function formatAfkDuration(ms) {
+    const seconds = Math.floor((ms / 1000) % 60);
+    const minutes = Math.floor((ms / (1000 * 60)) % 60);
+    const hours = Math.floor((ms / (1000 * 60 * 60)) % 24);
+    const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+
+    let duration = [];
+    if (days > 0) duration.push(`${days} hari`);
+    if (hours > 0) duration.push(`${hours} jam`);
+    if (minutes > 0) duration.push(`${minutes} menit`);
+    if (seconds > 0) duration.push(`${seconds} detik`);
+
+    return duration.join(', ') || 'beberapa saat';
+}
+
+async function handleAntiLink(sock, message, groupMetadata) {
+    if (!message.isGroup || !message.body || !groupMetadata) return;
+    
+    const groupSettings = db.get('groupSettings');
+    const groupSetting = groupSettings[message.from];
+    if (!groupSetting || !groupSetting.isAntilinkEnabled) return;
+
+    const linkRegex = /https:\/\/chat\.whatsapp\.com\/[a-zA-Z0-9]{22}/g;
+    if (linkRegex.test(message.body)) {
+        const sender = groupMetadata.participants.find(p => p.id === message.sender);
+        const isAdmin = sender && (sender.admin === 'admin' || sender.admin === 'superadmin');
+        const isOwner = message.sender.startsWith(config.ownerNumber);
+
+        if (isAdmin || isOwner) return;
+
+        const bot = groupMetadata.participants.find(p => p.id === sock.user.id.split(':')[0] + '@s.whatsapp.net');
+        const isBotAdmin = bot && (bot.admin === 'admin' || bot.admin === 'superadmin');
+
+        if (!isBotAdmin) return;
+
+        await message.reply('Terdeteksi link grup WhatsApp! Anda akan dikeluarkan.');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await sock.groupParticipantsUpdate(message.from, [message.sender], 'remove');
+    }
+}
+
+const handler = async (sock, m, options) => {
+    if (!m) return;
+    const message = await serialize(sock, m);
+
+    let groupMetadata = null;
+    if (message.isGroup) {
+        groupMetadata = await sock.groupMetadata(message.from);
+    }
+
+    if (message.body) {
+        const from = message.pushName;
+        const inType = message.isGroup ? 'Grup' : 'Pribadi';
+        const groupName = message.isGroup ? ` di ${groupMetadata.subject}` : '';
+        logger.info(`${inType} dari ${from}${groupName}: ${message.body}`);
+    }
+
+    if (await handleBombGame(sock, message)) return;
+    if (await handleGame(sock, message)) return;
+
+    await handleAntiLink(sock, message, groupMetadata);
+
+    const mentionedJids = message.msg?.contextInfo?.mentionedJid || [];
+    const quotedUserJid = message.msg?.contextInfo?.participant;
+    const jidsToCheck = [...new Set([...mentionedJids, quotedUserJid].filter(Boolean))];
+    
+    const afkData = db.get('afk');
+
+    if (afkData[message.sender]) {
+        const afkInfo = afkData[message.sender];
+        const duration = formatAfkDuration(Date.now() - afkInfo.time);
+        await message.reply(`👋 *Selamat datang kembali!*\n\nAnda telah AFK selama *${duration}*.`);
+        delete afkData[message.sender];
+        db.save('afk', afkData);
+    }
+
+    for (const jid of jidsToCheck) {
+        if (jid === message.sender) continue;
+        if (afkData[jid]) {
+            const afkInfo = afkData[jid];
+            const duration = formatAfkDuration(Date.now() - afkInfo.time);
+            const response = `🤫 Jangan ganggu dia!\n\n*User:* @${jid.split('@')[0]}\n*Status:* AFK sejak *${duration}* lalu\n*Alasan:* ${afkInfo.reason}`;
+            await sock.sendMessage(message.from, { text: response, mentions: [jid] }, { quoted: message });
         }
+    }
 
-        if (['terima', 'tolak'].includes(action)) {
-            const challengeKey = `${groupJid}:${senderJid}`;
-            const challenge = pendingBombGames.get(challengeKey);
+    if (config.autoRead) {
+        await sock.readMessages([message.key]);
+    }
 
-            if (!challenge) {
-                return message.reply('Tidak ada tantangan tebak bom untukmu saat ini.');
-            }
+    const ownerJid = `${config.ownerNumber}@s.whatsapp.net`;
+    const isOwner = message.sender === ownerJid;
 
-            clearTimeout(challenge.timeout);
-            pendingBombGames.delete(challengeKey);
-            const { challengerJid, amount } = challenge;
+    if (!config.isPublic && !isOwner) {
+        return;
+    }
 
-            if (action === 'tolak') {
-                return sock.sendMessage(groupJid, { text: `@${senderJid.split('@')[0]} telah menolak tantangan tebak bom dari @${challengerJid.split('@')[0]}.`, mentions: [senderJid, challengerJid] });
-            }
+    if (!message.body || !message.body.startsWith(config.prefix)) return;
 
-            if (action === 'terima') {
-                let usersDb = db.get('users');
-                const challengerBalance = usersDb[challengerJid]?.balance || 0;
-                const targetBalance = usersDb[senderJid]?.balance || 0;
+    const args = message.body.slice(config.prefix.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+    const plugin = plugins.get(command);
 
-                if (challengerBalance < amount || targetBalance < amount) {
-                    return message.reply('Salah satu pemain tidak memiliki cukup uang untuk taruhan. Permainan dibatalkan.');
-                }
-
-                const firstTurnJid = Math.random() < 0.5 ? challengerJid : senderJid;
-                const boxes = Array.from({ length: 9 }, (_, i) => numberToEmoji(i));
-                
-                const bombIndexes = [];
-                while (bombIndexes.length < 2) {
-                    const bomb = Math.floor(Math.random() * 9);
-                    if (!bombIndexes.includes(bomb)) {
-                        bombIndexes.push(bomb);
-                    }
-                }
-
-                const initialText = `*TEBAK BOM DIMULAI* 💣\n` +
-                    `Taruhan: *Rp ${amount.toLocaleString()}*\n\n` +
-                    generateBoard(boxes) +
-                    `\nGiliran pertama adalah @${firstTurnJid.split('@')[0]}.\n\n` +
-                    `_Balas pesan ini dengan nomor kotak._`;
-
-                const initialMsg = await sock.sendMessage(groupJid, { text: initialText, mentions: [firstTurnJid] });
-
-                activeBombGames.set(groupJid, {
-                    challengerJid,
-                    targetJid: senderJid,
-                    amount,
-                    turn: firstTurnJid,
-                    bombIndexes,
-                    boxes,
-                    messageID: initialMsg.key.id
-                });
-            }
-            return;
+    if (plugin) {
+        if (config.autoTyping) {
+            await sock.sendPresenceUpdate('composing', message.from);
         }
-
-        const targetJid = message.msg?.contextInfo?.mentionedJid?.[0];
-        const amount = parseInt(args[1]);
-
-        if (!targetJid || isNaN(amount) || amount <= 0) {
-            return message.reply('Gunakan format: *.tebakbom @user <jumlah_taruhan>*\nContoh: .tebakbom @user 1000');
+        try {
+            await plugin.run(sock, message, args, { activeGames, groupMetadata, activeBombGames });
+        } catch (e) {
+            logger.error(`Error saat menjalankan plugin ${command}:`, e);
+            message.reply(`Terjadi kesalahan: ${e.message}`);
         }
-        if (targetJid === senderJid) {
-            return message.reply('Anda tidak bisa menantang diri sendiri!');
-        }
-        if (pendingBombGames.has(`${groupJid}:${targetJid}`) || activeBombGames.has(groupJid)) {
-            return message.reply('Sudah ada tantangan atau permainan yang aktif di grup ini. Harap tunggu selesai.');
-        }
-
-        let usersDb = db.get('users');
-        const challengerBalance = usersDb[senderJid]?.balance || 0;
-        const targetBalance = usersDb[targetJid]?.balance || 0;
-
-        if (challengerBalance < amount || targetBalance < amount) {
-            return message.reply('Saldo Anda atau saldo target tidak cukup untuk taruhan ini.');
-        }
-
-        const challengeKey = `${groupJid}:${targetJid}`;
-        const timeout = setTimeout(() => {
-            if (pendingBombGames.has(challengeKey)) {
-                pendingBombGames.delete(challengeKey);
-                sock.sendMessage(groupJid, { text: `Tantangan tebak bom dari @${senderJid.split('@')[0]} untuk @${targetJid.split('@')[0]} telah kedaluwarsa.`, mentions: [senderJid, targetJid] });
-            }
-        }, 60 * 1000);
-
-        pendingBombGames.set(challengeKey, { challengerJid: senderJid, amount, timeout });
-        await sock.sendMessage(groupJid, { text: `💣 *TANTANGAN TEBAK BOM* 💣\n\n@${senderJid.split('@')[0]} menantang @${targetJid.split('@')[0]} untuk bermain tebak bom dengan taruhan *Rp ${amount.toLocaleString()}*!\n\nKetik *.tebakbom terima* atau *.tebakbom tolak*. Waktu 60 detik.`, mentions: [senderJid, targetJid] });
     }
 };
+
+module.exports = handler;
