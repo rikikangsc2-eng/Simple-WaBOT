@@ -73,9 +73,30 @@ module.exports = {
                     `Taruhan: *Rp ${amount.toLocaleString()}*\n\n` +
                     generateBoard(boxes) +
                     `\nGiliran pertama adalah @${firstTurnJid.split('@')[0]}.\n\n` +
-                    `_Balas pesan ini dengan nomor kotak._`;
+                    `_Balas pesan ini dengan nomor kotak (Waktu 30 detik)._`;
 
                 const initialMsg = await sock.sendMessage(groupJid, { text: initialText, mentions: [firstTurnJid] });
+
+                const timeout = setTimeout(() => {
+                    const game = activeBombGames.get(groupJid);
+                    if (game && game.messageID === initialMsg.key.id) {
+                        const winnerJid = (firstTurnJid === challengerJid) ? senderJid : challengerJid;
+                        const loserJid = firstTurnJid;
+                        
+                        let currentUsersDb = db.get('users');
+                        currentUsersDb[winnerJid].balance += amount;
+                        currentUsersDb[loserJid].balance -= amount;
+                        db.save('users', currentUsersDb);
+
+                        const endText = `*WAKTU HABIS!* ⏰\n\n` +
+                            `@${loserJid.split('@')[0]} tidak menjawab dalam 30 detik.\n` +
+                            `Pemenangnya adalah @${winnerJid.split('@')[0]} dan mendapatkan *Rp ${amount.toLocaleString()}*!\n\n` +
+                            `*Papan Terakhir:*\n${generateBoard(game.boxes)}`;
+                        
+                        sock.sendMessage(groupJid, { text: endText, mentions: [winnerJid, loserJid] });
+                        activeBombGames.delete(groupJid);
+                    }
+                }, 30000);
 
                 activeBombGames.set(groupJid, {
                     challengerJid,
@@ -84,7 +105,8 @@ module.exports = {
                     turn: firstTurnJid,
                     bombIndexes,
                     boxes,
-                    messageID: initialMsg.key.id
+                    messageID: initialMsg.key.id,
+                    timeout
                 });
             }
             return;
