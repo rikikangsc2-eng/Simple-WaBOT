@@ -7,7 +7,7 @@ module.exports = {
         const usersDb = db.get('users');
         const user = usersDb[message.sender] || {
             balance: 0,
-            gold: 0,
+            emas: 0,
             iron: 0,
             bara: 0,
             baja: 0,
@@ -18,7 +18,7 @@ module.exports = {
             `*Nama:* ${message.pushName}\n\n` +
             `*Aset:*\n` +
             `- *Saldo:* Rp ${(user.balance || 0).toLocaleString()}\n` +
-            `- *Emas:* ${(user.gold || 0).toFixed(3)} gram\n` +
+            `- *Emas:* ${(user.emas || 0).toFixed(3)} gram\n` +
             `- *Iron:* ${(user.iron || 0).toFixed(3)} gram\n` +
             `- *Bara:* ${(user.bara || 0).toFixed(3)} gram\n\n` +
             `*Perlengkapan:*\n` +
