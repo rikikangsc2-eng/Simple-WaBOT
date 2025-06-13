@@ -12,12 +12,11 @@ const db = require('./lib/database');
 const logger = require('./lib/logger');
 const { loadPlugins } = require('./lib/pluginManager');
 const { setConnectionStatus, processQueue } = require('./lib/connectionManager');
-const { getDb } = require('./lib/mongoClient');
+const { getDb, useMongoDBAuthState } = require('./lib/mongoClient');
 
 const sessionPath = path.join(__dirname, 'session');
 
 let priceUpdateInterval = null;
-let consecutive5xxErrors = 0;
 
 async function synchronizeDatabase() {
     if (config.databaseType !== 'cloud') return;
@@ -57,53 +56,39 @@ async function synchronizeDatabase() {
     logger.info('Pemeriksaan sinkronisasi database selesai.');
 }
 
-async function handleFatalErrorAndRestart() {
-    logger.error('Terdeteksi error fatal (3x error 5xx). Menghapus seluruh sesi untuk memulai ulang.');
-    try {
-        if (fs.existsSync(sessionPath)) {
-            fs.rmSync(sessionPath, { recursive: true, force: true });
-            logger.info('Folder sesi lokal telah dihapus.');
-        }
-    } catch (e) {
-        logger.error('Gagal menghapus sesi lokal:', e);
-    } finally {
-        process.exit(1);
-    }
-}
 
-async function updateMarketPrices() {
-    const market = await db.get('market');
+function updateMarketPrices() {
+    let market = db.get('market');
     const commodities = ['emas', 'iron', 'bara'];
-    let updatedMarket = market || {};
-
+    
     commodities.forEach(item => {
         const basePrices = { emas: 75000, iron: 25000, bara: 15000 };
         const fluctuations = { emas: 500, iron: 150, bara: 100 };
         const minPrices = { emas: 5000, iron: 1000, bara: 500 };
-
-        const oldPrice = updatedMarket[`${item}_price`] || basePrices[item];
-        updatedMarket[`last_${item}_price`] = oldPrice;
-
+        
+        const oldPrice = market[`${item}_price`] || basePrices[item];
+        market[`last_${item}_price`] = oldPrice;
+        
         const fluctuation = Math.floor(Math.random() * (2 * fluctuations[item] + 1)) - fluctuations[item];
         let newPrice = oldPrice + fluctuation;
-
+        
         if (newPrice < minPrices[item]) newPrice = minPrices[item];
-
-        updatedMarket[`${item}_price`] = newPrice;
+        
+        market[`${item}_price`] = newPrice;
     });
 
-    await db.save('market', updatedMarket);
+    db.save('market', market);
     logger.info('[MARKET UPDATE] Harga pasar berhasil diperbarui.');
 }
 
 async function handleGroupUpdate(sock, event) {
     const { id, participants, action } = event;
     if (action !== 'add') return;
-
+    
     const groupSettings = await db.get('groupSettings');
     const groupSetting = groupSettings[id];
     if (!groupSetting || !groupSetting.isWelcomeEnabled) return;
-
+    
     const groupMeta = await sock.groupMetadata(id);
     const groupName = groupMeta.subject;
 
@@ -111,17 +96,18 @@ async function handleGroupUpdate(sock, event) {
         const welcomeText = groupSetting.welcomeMessage
             .replace(/\$group/g, groupName)
             .replace(/@user/g, `@${jid.split('@')[0]}`);
-
+            
         let userThumb;
         try {
-            userThumb = await getBuffer(await sock.profilePictureUrl(jid, 'image'));
+            const ppUrl = await sock.profilePictureUrl(jid, 'image');
+            userThumb = await getBuffer(ppUrl);
         } catch (e) {
             userThumb = null;
         }
 
-        const messageOptions = {
-            text: welcomeText,
-            contextInfo: {
+        const messageOptions = { 
+            text: welcomeText, 
+            contextInfo: { 
                 mentionedJid: [jid],
                 externalAdReply: userThumb ? {
                     title: config.botName,
@@ -130,16 +116,16 @@ async function handleGroupUpdate(sock, event) {
                     sourceUrl: `https://wa.me/${config.ownerNumber}`,
                     mediaType: 1
                 } : null
-            }
+            } 
         };
-
-        sock.sendMessage(id, messageOptions);
+        
+        await sock.sendMessage(id, messageOptions);
     }
 }
 
 function formatUptime(seconds) {
     function pad(s) { return (s < 10 ? '0' : '') + s; }
-    const hours = Math.floor(seconds / 3600);
+    const hours = Math.floor(seconds / (3600));
     const minutes = Math.floor(seconds % 3600 / 60);
     const secs = Math.floor(seconds % 60);
     return `${pad(hours)}h ${pad(minutes)}m ${pad(secs)}s`;
@@ -150,7 +136,16 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 const INITIAL_RECONNECT_DELAY = 5000;
 
 async function connectToWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+    let auth;
+    if (config.databaseType === 'cloud') {
+        logger.info('Menggunakan penyimpanan sesi MongoDB.');
+        auth = await useMongoDBAuthState();
+    } else {
+        logger.info('Menggunakan penyimpanan sesi lokal.');
+        auth = await useMultiFileAuthState(sessionPath);
+    }
+    
+    const { state, saveCreds } = auth;
     
     const sock = makeWASocket({ 
         auth: state, 
@@ -166,7 +161,6 @@ async function connectToWhatsApp() {
 
         if (connection === 'open') {
             reconnectAttempts = 0;
-            consecutive5xxErrors = 0;
             setConnectionStatus(true);
             console.log(chalk.green('\nKoneksi WhatsApp berhasil. Bot siap digunakan!'));
             logger.info(`Terhubung sebagai ${sock.user.name || config.botName}`);
@@ -179,18 +173,6 @@ async function connectToWhatsApp() {
         } else if (connection === 'close') {
             setConnectionStatus(false);
             const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
-            
-            if (statusCode >= 500 && statusCode < 600) {
-                consecutive5xxErrors++;
-                logger.warn(`Terdeteksi error 5xx ke-${consecutive5xxErrors}.`);
-                if (consecutive5xxErrors >= 3) {
-                    await handleFatalErrorAndRestart();
-                    return;
-                }
-            } else {
-                consecutive5xxErrors = 0;
-            }
-
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             logger.warn(`Koneksi terputus (Kode: ${statusCode}), mencoba menyambungkan kembali: ${shouldReconnect}`);
             
@@ -261,7 +243,6 @@ async function startBot() {
     console.log(chalk.gray(`by ${config.ownerName}\n`));
 
     await db.init();
-    await db.cleanup();
     await synchronizeDatabase();
 
     loadPlugins();
