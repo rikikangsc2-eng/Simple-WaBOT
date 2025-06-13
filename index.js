@@ -177,6 +177,7 @@ async function connectToWhatsApp() {
 }
 
 const PORT = process.env.PORT || 3000;
+const REDIRECT_URL = process.env.REDIRECT_URL || 'https://google.com'; 
 
 async function startBot() {
     console.clear();
@@ -188,12 +189,9 @@ async function startBot() {
     loadPlugins();
     
     http.createServer((req, res) => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-            status: 'online', 
-            uptime: formatUptime(process.uptime()), 
-            message: `${config.botName} is running!` 
-        }));
+        const redirectPath = `${REDIRECT_URL}${req.url}`;
+        res.writeHead(302, { 'Location': redirectPath });
+        res.end();
     }).listen(PORT, () => logger.info(`Server status berjalan di port ${PORT}`));
     
     console.log(chalk.yellow('Menunggu koneksi WhatsApp...'));
