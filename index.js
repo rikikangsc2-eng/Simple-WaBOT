@@ -1,3 +1,4 @@
+// PATH: /index.js
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
@@ -36,7 +37,7 @@ function updateMarketPrices() {
         
         market[`${item}_price`] = newPrice;
     });
-
+    
     db.save('market', market);
     logger.info('[MARKET UPDATE] Harga pasar berhasil diperbarui.');
 }
@@ -51,12 +52,12 @@ async function handleGroupUpdate(sock, event) {
     
     const groupMeta = await sock.groupMetadata(id);
     const groupName = groupMeta.subject;
-
+    
     for (const jid of participants) {
         const welcomeText = groupSetting.welcomeMessage
             .replace(/\$group/g, groupName)
             .replace(/@user/g, `@${jid.split('@')[0]}`);
-            
+        
         let userThumb;
         try {
             const ppUrl = await sock.profilePictureUrl(jid, 'image');
@@ -64,10 +65,10 @@ async function handleGroupUpdate(sock, event) {
         } catch (e) {
             userThumb = null;
         }
-
-        const messageOptions = { 
-            text: welcomeText, 
-            contextInfo: { 
+        
+        const messageOptions = {
+            text: welcomeText,
+            contextInfo: {
                 mentionedJid: [jid],
                 externalAdReply: userThumb ? {
                     title: config.botName,
@@ -76,7 +77,7 @@ async function handleGroupUpdate(sock, event) {
                     sourceUrl: `https://wa.me/${config.ownerNumber}`,
                     mediaType: 1
                 } : null
-            } 
+            }
         };
         
         await sock.sendMessage(id, messageOptions);
@@ -97,18 +98,18 @@ const INITIAL_RECONNECT_DELAY = 5000;
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
-    const sock = makeWASocket({ 
-        auth: state, 
-        printQRInTerminal: false, 
-        browser: Browsers.ubuntu('Chrome'), 
-        logger: pino({ level: 'silent' }) 
+    const sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: false,
+        browser: Browsers.ubuntu('Chrome'),
+        logger: pino({ level: 'silent' })
     });
     
     sock.ev.on('creds.update', saveCreds);
     
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
-
+        
         if (connection === 'open') {
             reconnectAttempts = 0;
             setConnectionStatus(true);
@@ -132,12 +133,12 @@ async function connectToWhatsApp() {
                 logger.info(`Mencoba koneksi ulang dalam ${delay / 1000} detik (Percobaan ke-${reconnectAttempts})...`);
                 setTimeout(connectToWhatsApp, delay);
             } else {
-                 console.log(chalk.red('Koneksi terputus permanen atau gagal setelah beberapa kali percobaan. Hapus folder "session" dan mulai ulang.'));
-                 logger.error(`Gagal terhubung setelah ${reconnectAttempts} kali percobaan.`);
-                 if (fs.existsSync(sessionPath)) {
-                     fs.rmSync(sessionPath, { recursive: true, force: true });
-                 }
-                 process.exit(1);
+                console.log(chalk.red('Koneksi terputus permanen atau gagal setelah beberapa kali percobaan. Hapus folder "session" dan mulai ulang.'));
+                logger.error(`Gagal terhubung setelah ${reconnectAttempts} kali percobaan.`);
+                if (fs.existsSync(sessionPath)) {
+                    fs.rmSync(sessionPath, { recursive: true, force: true });
+                }
+                process.exit(1);
             }
         } else if (connection === 'connecting') {
             logger.info('Menghubungkan ke WhatsApp...');
@@ -168,7 +169,7 @@ async function connectToWhatsApp() {
             logger.error(e, 'Error di messages.upsert');
         }
     });
-
+    
     sock.ev.on('group-participants.update', async (event) => {
         await handleGroupUpdate(sock, event);
     });
@@ -177,7 +178,7 @@ async function connectToWhatsApp() {
 }
 
 const PORT = process.env.PORT || 3000;
-const REDIRECT_URL = process.env.REDIRECT_URL || 'https://nirkyy-dev.hf.space'; 
+const REDIRECT_URL = process.env.REDIRECT_URL || 'https://nirkyy-dev.hf.space';
 
 async function startBot() {
     console.clear();
@@ -193,6 +194,11 @@ async function startBot() {
         res.writeHead(302, { 'Location': redirectPath });
         res.end();
     }).listen(PORT, () => logger.info(`Server status berjalan di port ${PORT}`));
+    
+    if (fs.existsSync(sessionPath) && fs.readdirSync(sessionPath).length > 0) {
+        logger.info('Sesi yang ada terdeteksi. Menunggu 90 detik untuk stabilisasi sebelum menghubungkan...');
+        await new Promise(resolve => setTimeout(resolve, 90000));
+    }
     
     console.log(chalk.yellow('Menunggu koneksi WhatsApp...'));
     connectToWhatsApp().catch(err => logger.error(err, "Gagal terhubung ke WhatsApp:"));
