@@ -12,50 +12,10 @@ const db = require('./lib/database');
 const logger = require('./lib/logger');
 const { loadPlugins } = require('./lib/pluginManager');
 const { setConnectionStatus, processQueue } = require('./lib/connectionManager');
-const { getDb } = require('./lib/mongoClient');
 
 const sessionPath = path.join(__dirname, 'session');
 
 let priceUpdateInterval = null;
-
-async function synchronizeDatabase() {
-    if (config.databaseType !== 'cloud') return;
-
-    logger.info('Mode Cloud aktif, memeriksa sinkronisasi database...');
-    const mongoDb = getDb();
-    const localDbDir = path.join(__dirname, 'database');
-    if (!fs.existsSync(localDbDir)) return;
-
-    const files = fs.readdirSync(localDbDir);
-    for (const file of files) {
-        if (path.extname(file) === '.json') {
-            const dbName = path.basename(file, '.json');
-            const filePath = path.join(localDbDir, file);
-
-            try {
-                const fileContent = fs.readFileSync(filePath, 'utf8');
-                if (!fileContent || fileContent.trim() === '{}') continue;
-
-                const data = JSON.parse(fileContent);
-                if (Object.keys(data).length === 0) continue;
-
-                const collection = mongoDb.collection('data');
-                const cloudData = await collection.findOne({ _id: dbName });
-
-                if (!cloudData) {
-                    logger.info(`Data lokal '${dbName}.json' ditemukan. Memigrasi ke MongoDB...`);
-                    await collection.insertOne({ _id: dbName, data: data });
-                    fs.renameSync(filePath, `${filePath}.migrated`);
-                    logger.info(`Migrasi untuk '${dbName}' berhasil. File lokal diubah namanya menjadi .migrated`);
-                }
-            } catch (e) {
-                logger.error(`Gagal memproses atau migrasi file lokal ${file}:`, e);
-            }
-        }
-    }
-    logger.info('Pemeriksaan sinkronisasi database selesai.');
-}
-
 
 function updateMarketPrices() {
     let market = db.get('market');
@@ -85,7 +45,7 @@ async function handleGroupUpdate(sock, event) {
     const { id, participants, action } = event;
     if (action !== 'add') return;
     
-    const groupSettings = await db.get('groupSettings');
+    const groupSettings = db.get('groupSettings');
     const groupSetting = groupSettings[id];
     if (!groupSetting || !groupSetting.isWelcomeEnabled) return;
     
@@ -217,25 +177,26 @@ async function connectToWhatsApp() {
 }
 
 const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ 
-        status: 'online', 
-        uptime: formatUptime(process.uptime()), 
-        message: `${config.botName} is running!` 
-    }));
-}).listen(PORT, () => logger.info(`Server status berjalan di port ${PORT}`));
-
 
 async function startBot() {
     console.clear();
     console.log(chalk.bold.cyan(config.botName));
     console.log(chalk.gray(`by ${config.ownerName}\n`));
-
-    await db.init();
-    await synchronizeDatabase();
-
+    
+    await db.connectToDB();
+    
     loadPlugins();
+    
+    http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            status: 'online', 
+            uptime: formatUptime(process.uptime()), 
+            message: `${config.botName} is running!` 
+        }));
+    }).listen(PORT, () => logger.info(`Server status berjalan di port ${PORT}`));
+    
+    console.log(chalk.yellow('Menunggu koneksi WhatsApp...'));
     connectToWhatsApp().catch(err => logger.error(err, "Gagal terhubung ke WhatsApp:"));
 }
 

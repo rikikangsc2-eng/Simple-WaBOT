@@ -9,6 +9,5 @@ module.exports = {
     "isPublic": true,
     "autoRead": true,
     "autoTyping": true,
-    "databaseType": "cloud", //ubah ke "local" jika gak punya mongodb
-    "mongoURI": "mongodb+srv://puruproject:puru@cluster0.tolnaqa.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+    "mongoDbName": "NirKyyBotDB"
 };

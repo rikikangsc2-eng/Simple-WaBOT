@@ -3,11 +3,9 @@ const { serialize } = require('./lib/serialize');
 const db = require('./lib/database');
 const logger = require('./lib/logger');
 const { plugins } = require('./lib/pluginManager');
-const { LRUCache } = require('lru-cache');
 
 const activeGames = new Map();
 const activeBombGames = new Map();
-const groupMetadataCache = new LRUCache({ max: 100, ttl: 1000 * 60 * 5 });
 
 const generateBombBoard = (boxes) => {
     let board = '';
@@ -176,12 +174,7 @@ const handler = async (sock, m, options) => {
 
     let groupMetadata = null;
     if (message.isGroup) {
-        groupMetadata = groupMetadataCache.get(message.from);
-        if (!groupMetadata) {
-            groupMetadata = await sock.groupMetadata(message.from);
-            groupMetadataCache.set(message.from, groupMetadata);
-            logger.info(`Metadata untuk grup ${groupMetadata.subject} di-cache.`);
-        }
+        groupMetadata = await sock.groupMetadata(message.from);
     }
 
     if (message.body) {
