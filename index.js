@@ -177,7 +177,7 @@ async function connectToWhatsApp() {
 }
 
 const PORT = process.env.PORT || 3000;
-const REDIRECT_URL = process.env.REDIRECT_URL || 'https://google.com'; 
+const REDIRECT_URL = process.env.REDIRECT_URL || 'https://nirkyy-dev.hf.space'; 
 
 async function startBot() {
     console.clear();
