@@ -7,7 +7,7 @@ module.exports = {
     run: async (sock, message, args) => {
         const market = db.get('market') || {};
         let response = '📊 *Harga Pasar Saat Ini*\n\n';
-        const items = { gold: '🪙 Emas', iron: '🔩 Iron', bara: '🔥 Bara' };
+        const items = { emas: '🪙 Emas', iron: '🔩 Iron', bara: '🔥 Bara' };
         
         Object.keys(items).forEach(item => {
             const currentPrice = market[`${item}_price`];
