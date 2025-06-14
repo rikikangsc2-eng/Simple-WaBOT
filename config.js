@@ -8,6 +8,5 @@ module.exports = {
     "joinPrice": 500000,
     "isPublic": true,
     "autoRead": true,
-    "autoTyping": true,
-    "mongoDbName": "NirKyyBotDB"
+    "autoTyping": true
 };

@@ -6,7 +6,6 @@
     "wa-sticker-formatter": "^4.4.4",
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "npm:baileys@latest",
-    "mongodb":"*",
     "chalk": "^4.1.2",
     "pino": "^9.7.0",
     "lru-cache": "^11.1.0",

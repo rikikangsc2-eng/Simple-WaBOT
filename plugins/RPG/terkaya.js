@@ -7,12 +7,11 @@ module.exports = {
         const usersDb = db.get('users');
         
         const sortedUsers = Object.entries(usersDb)
-            .filter(([jid, user]) => user && typeof user.balance === 'number')
             .sort(([, a], [, b]) => b.balance - a.balance)
             .slice(0, 10);
 
         if (sortedUsers.length === 0) {
-            return message.reply('Belum ada pengguna di papan peringkat yang memiliki saldo valid.');
+            return message.reply('Belum ada pengguna di papan peringkat.');
         }
 
         let leaderboardText = '🏆 *Papan Peringkat Terkaya*\n\n';

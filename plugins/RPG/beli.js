@@ -23,7 +23,7 @@ module.exports = {
 
         const totalCost = Math.ceil(price * amount);
         let usersDb = db.get('users');
-        const user = usersDb[message.sender] || { balance: 0, emas: 0, iron: 0, bara: 0 };
+        const user = usersDb[message.sender] || { balance: 0, gold: 0, iron: 0, bara: 0 };
 
         if (user.balance < totalCost) {
             return message.reply(`Saldo Anda tidak cukup.\n\n*Saldo Anda:* Rp ${user.balance.toLocaleString()}\n*Harga Beli:* Rp ${totalCost.toLocaleString()} untuk ${amount} gram ${item}.`);
